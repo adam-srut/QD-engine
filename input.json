@@ -1,0 +1,13 @@
+
+{
+   "potential" : "test/potential.dat", 
+   "adiabatic" : true,
+   "mass"      : 14.2480094,
+   "initpos"   : 0.0,
+   "k_harm"    : 1.21425,
+   "dt"        : 1.0,
+   "tmax"      : 100000,
+   "stride"    : 20 
+    }
+
+    
