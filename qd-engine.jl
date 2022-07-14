@@ -1,10 +1,12 @@
 #! /usr/bin/env -S julia --project=/work/qd-engine/project_1dqd
 
+println("Loading packages...")
 #using Threads
 using LinearAlgebra, FFTW
 using Statistics
 using JSON
 using Printf
+using SpecialPolynomials
 
 
 #===================================================
@@ -17,8 +19,9 @@ c = 29979245800                 # Speed of light in cm/s
 fs_to_au = 41.341373335
 ang_to_bohr = 1.889726125
 μ_to_me = 1822.88849            # Atomic mass unit in masses of an electron
-e = 1.60218e-18                 # e⁻ charge
+e = 1.60218e-19                 # e⁻ charge
 h = 6.62607e-34                 # Planck constant
+kB = 3.16681e-6                 # Boltzmann constant in a.u.
 
 
 #===================================================
@@ -98,7 +101,7 @@ function save_data(data::Array, x_space::Array, dt::Float64)
         header = "# time [fs] Probability amplitude [momentum]---->\n"
         write(file, header)
         write(file, " "^12)
-        line = map( x -> write(file, @sprintf("%12d", x)), -length(x_space)/2:(length(x_space)/2-1) )
+        map( x -> write(file, @sprintf("%12d", x)), -length(x_space)/2:(length(x_space)/2-1) )
         write(file, "\n")
         for (i, dat) in enumerate(eachrow(data))
             if mod(i,2) == 0
@@ -109,7 +112,7 @@ function save_data(data::Array, x_space::Array, dt::Float64)
             dat = Array{ComplexF64}(dat)
             k_dat = fftshift(fft(dat))
             k_dat = Float64.( conj(k_dat) .* k_dat )
-            line = map(x -> write(file, @sprintf("%12.7f", x)), k_dat)
+            map(x -> write(file, @sprintf("%12.7f", x)), k_dat)
             write(file, "\n")
         end
     end
@@ -205,7 +208,7 @@ function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number,
         end
     end
     # Compute transmission and reflection coefficients
-    do_spec(cf::Array) = abs.(fft( [ cf .- mean(cf); zeros(length(cf)*2) ] ))
+    do_spec(cf::Array) = abs.(fft( [ cf .- mean(cf); zeros(length(cf)*3) ] ))
     σTr = do_spec(cf_tr) 
     σRe = do_spec(cf_re)
     σTot = σTr + σRe
@@ -217,13 +220,29 @@ function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number,
         head = @sprintf "#%13s%14s%14s%14s%14s%14s\n" "Energy [eV]" "σTot" "σRe" "σTr" "Re" "Tr"
         write(file, head)
         for i in 1:length(engs)
-            if engs[i] > 0.5
+            if engs[i] > 5
                 break
             end
             line = @sprintf "%14.4f%14.7f%14.7f%14.7f%14.7f%14.7f\n" engs[i] σTot[i] σRe[i] σTr[i] re_E[i] tr_E[i]
             write(file, line)
         end
     end
+end
+
+function construct_HarmWP(temp::Number, x0::Float64, k::Float64, μ::Float64,
+        x_space::Array{Float64})
+    
+    chi(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) * basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
+    energy(n::Int) = sqrt(k/μ) * (n+1/2)
+    Z(temp::Number) = 1/(1 - exp( -(sqrt(k/μ)/kB/temp) ) )
+    wf0 = zeros(length(x_space))
+    for n in 1:10
+        pop = exp( -( (energy(n-1) - energy(0))/kB/temp ) )/Z(temp)
+        wfn = map( x -> -1*pop*chi(n-1, x), x_space)
+        wf0 += wfn
+    end
+    wf0 = wf0/sqrt(dot(wf0, wf0)) 
+    return wf0
 end
 
 #===================================================
@@ -245,6 +264,12 @@ dt = input["dt"]
 stride = input["stride"]
 tmax = input["tmax"]
 
+# Construct initial WP as a superposition of harmonic states weighted by Boltzmann factors
+if haskey(input, "boltzmann")
+    temp = input["boltzmann"]
+    wf0 = construct_HarmWP(temp, x0, k_harm, μ, x_space)
+end
+
 # Read dipole moment (if available)
 if haskey(input, "dipole")
     (space, dipole) = read_potential(input["dipole"])
@@ -262,7 +287,7 @@ end
 # Initialize output:
 N_records = Int(fld(tmax/dt, stride))   # Number of records in output files
 data = Array{Complex}(undef, N_records, length(x_space))    # Ψ(t)
-cf = Array{Float64}(undef, N_records)       # correlation function <ψ(0)|ψ(t)>
+cf = Array{ComplexF64}(undef, N_records)       # correlation function <ψ(0)|ψ(t)>
 dip_cf = Array{Float64}(undef, N_records)   # dipole corr.func. <ψ(0)|μ|ψ(t)>
 
 
@@ -270,6 +295,7 @@ dip_cf = Array{Float64}(undef, N_records)   # dipole corr.func. <ψ(0)|μ|ψ(t)>
                 Execute dynamics
 ===================================================#
 
+println("Running dynamics...")
 istep = 1
 t = 0
 wf = wf0 
@@ -285,7 +311,7 @@ while t < tmax
     # Save data:
     if mod(istep, stride) == 0
         i_rec = Int(istep/stride)
-        data[i_rec, :] = wf # Float64.(wf .* conj(wf))
+        data[i_rec, :] = wf 
         cf[i_rec] = abs(dot(wf0, wf))
         if haskey(input, "dipole")
             dip_cf[i_rec] = Float64(dot(wf0, dipole .* wf))
@@ -298,8 +324,9 @@ end
             Analyze and save the results
 ===================================================#
 
-save_data(data, x_space, dt)        # Save |Ψ(x,t)|² and |Ψ(k,t)|²
-save_vec(cf, "corrF.dat", dt)       # Save <ψ(0)|ψ(t)>
+println("Analyzing and saving...")
+save_data(data, x_space, dt)            # Save |Ψ(x,t)|² and |Ψ(k,t)|²
+save_vec(cf, "corrF.dat", dt )          # Save |<ψ(0)|ψ(t)>|
 compute_spectrum(cf, dt*stride/fs_to_au)
 #compute_spectrum(dip_cf, dt*stride/fs_to_au, "dip-spectrum")
 
