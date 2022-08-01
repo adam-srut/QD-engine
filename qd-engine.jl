@@ -4,9 +4,9 @@ println("Loading packages...")
 #using Threads
 using LinearAlgebra, FFTW
 using Statistics
-using JSON
+using YAML
 using Printf
-using SpecialPolynomials
+#using SpecialPolynomials
 
 
 #===================================================
@@ -49,7 +49,7 @@ end
 
 
 function propagate(potential::Array{Float64}, p::Float64,
-        x_space::Array, dt::Float64, wf::Array)
+        x_space::Array, dt::Number, wf::Array)
     #= Function for a propagation of a wavepacket in one dimension
         using the Direct Fourier Method.
         All input variables are in atomic units.
@@ -58,10 +58,10 @@ function propagate(potential::Array{Float64}, p::Float64,
         x_space => Array of spatial coordinates
         dt => time increment 
         wf => wavefunction at time t (Complex array)
-        NOTE: ADD PREPARED FFT=#
+        TODO: ADD PREPARED FFT=#
     
     N = length(x_space)
-    i_k = -N/2:N/2-1        # Assuming symmetric x range
+    i_k = -N/2:N/2-1       
     wf = fft(wf)
     wf = fftshift(wf)
     wf = wf .* exp.( -(im*p*dt/2) * i_k.^2 )
@@ -119,6 +119,7 @@ function save_data(data::Array, x_space::Array, dt::Float64)
 end
 
 function save_vec(cf::Array, filename::String, dt::Float64)
+    #= Save an array of numbers for each timestep =#
     open(filename, "w") do file
         header = "# time [fs] val\n"
         write(file, header)
@@ -131,19 +132,25 @@ function save_vec(cf::Array, filename::String, dt::Float64)
     end
 end
 
-function compute_spectrum(cf::Array, timestep::Number)
+function compute_spectrum(cf::Array, timestep::Number; maxWn::Number=4000, zpe::Number=0)
+    #= Compute spectrum from auto-correlation function.
+        cf => Complex array
+        timestep => dt*stride in fs 
+        upperBound => save spectrum up to certain wavenumber =#
     cf = cf .- mean(cf)
-    cf = [ cf ; zeros(length(cf)*10) ]
-    spectrum = abs.(fft(cf)) .^ 2
-    spectrum = spectrum/norm(spectrum)
+    cf = [ cf ; zeros(length(cf)*5) ]
+    spectrum = real.(fft(cf)) .^ 2
     dv = 1/(length(cf)*timestep*1e-15)
-    c = 29979245800
-    wns = [ i*dv/c for i in 0:length(cf)-1 ]
+    wns = [ zpe + i*dv/c for i in 0:length(cf)-1 ]
     spectrum = wns .* spectrum
+    spectrum = spectrum/norm(spectrum)
+    nyquist = 1/(timestep*1e-15)/2/c
      
-    open("pos-spectrum.dat", "w") do file
+    open("spectrum.dat", "w") do file
+        head = @sprintf "# Nyquist freq. = %12.5e [cm⁻¹]\n#%11s%12s\n" nyquist "wn. [cm⁻¹]" "Amplitude"
+        write(file, head)
         for (wn, val) in zip(wns, spectrum)
-            if wn > 4000
+            if wn > maxWn
                 break
             end
             line = @sprintf "%12.7f%12.7f\n" wn val
@@ -151,32 +158,12 @@ function compute_spectrum(cf::Array, timestep::Number)
         end
     end
 end
-
-function electronic_spectrum(cf::Array, timestep::Number, zpe::Number, name::String)
-    cf = cf .- mean(cf)
-    cf = [ cf ; zeros(length(cf)*10) ]
-    spectrum = real.(fft(cf))
-    spectrum = spectrum/norm(spectrum)
-    dv = 1/(length(cf)*timestep*1e-15)
-    c = 29979245800
-    wns = [ (i*dv + zpe)/c for i in 0:length(cf)-1 ]
-    spectrum = wns .* spectrum
-
-    open("$name.dat", "w") do file
-        for (wn, val) in zip(wns, spectrum)
-            if wn > 20000
-                break
-            end
-            line = @sprintf "%12.7f%12.7f\n" wn val
-            write(file, line)
-        end
-    end
-end
-
 
 function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number, 
         dt::Float64, stride::Int)
-    
+    #=  Compute the transmission and reflection coeffs. as a function of energy.
+        Space has to be divided by the top of the barrier and time after a scattering event needs to be specified.
+        Whole procedure is describe in Tannor (2007) Introduction to Quantum Mechanics: A time-dependent perspective; Section 7.1.1 =#
     dx = (x_space[end] - x_space[1])/(length(x_space)-1)
     delim_i = Int(round((delim - x_space[1])/dx))
     T_i = Int(round(T/dt/stride))
@@ -229,9 +216,31 @@ function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number,
     end
 end
 
+function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number=1.0, tmax::Number=500)
+    #= Function will propagate an arbitrary WF in imaginary time.
+        Use to determine the initial WP.
+        NOTE: Does not conserve norm!!! =#
+    t = 0
+    wf = wf0
+
+    while t < tmax
+        wf = propagate(gs_potential, p, x_space, -dt*im, wf)
+        t += dt
+    end
+    open("init-WF.dat", "w") do file
+        head = @sprintf "#%15s%16s%16s%16s\n" "x [Bohr]" "real" "imag" "P.Amp."
+        write(file, head)
+        for i in 1:length(wf)
+            line = @sprintf "%16.5e%16.5e%16.7e%16.5e\n" x_space[i] real(wf[i]) imag(wf[i]) conj(wf[i])*wf[i]
+            write(file, line)
+        end
+    end
+    return wf
+end
+
 function construct_HarmWP(temp::Number, x0::Float64, k::Float64, μ::Float64,
         x_space::Array{Float64})
-    
+    #= Redundant function. Use of SpecitalPolynomials is needed.=#
     chi(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) * basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
     energy(n::Int) = sqrt(k/μ) * (n+1/2)
     Z(temp::Number) = 1/(1 - exp( -(sqrt(k/μ)/kB/temp) ) )
@@ -250,45 +259,48 @@ end
 ===================================================#
 
 # Read input:
-input = JSON.parsefile("input.json")
+input = YAML.load_file("input.yml")
 
 # Essential parameters
 (x_space, potential) = read_potential(input["potential"])
 μ = input["mass"] * μ_to_me
-k_harm = input["k_harm"]
-x0 = input["initpos"]
+k_harm = input["initWF"]["k_harm"]
+x0 = input["initWF"]["initpos"]
 wf0 = exp.( -(1/2*sqrt(μ*k_harm) * (x_space .- x0).^2 ))
 wf0 = wf0/sqrt(dot(wf0,wf0))
 p = (1/2/μ)*(1/(x_space[end] - x_space[1]))^2        # Constant for kinetic energy propagation
-dt = input["dt"]
-stride = input["stride"]
-tmax = input["tmax"]
+dt = input["params"]["dt"]
+stride = input["params"]["stride"]
+tmax = input["params"]["tmax"]
 
 # Construct initial WP as a superposition of harmonic states weighted by Boltzmann factors
-if haskey(input, "boltzmann")
-    temp = input["boltzmann"]
-    wf0 = construct_HarmWP(temp, x0, k_harm, μ, x_space)
-end
-
-# Read dipole moment (if available)
-if haskey(input, "dipole")
-    (space, dipole) = read_potential(input["dipole"])
-end
-
-# Calculation of electronic spectra (NOT WORKING PROPERLY)
-haskey(input, "vibres_spec") ? vibres = true : vibres = false
-
-# Prepare calculation of reflection and transmission coeffs.:
-if haskey(input, "scatter")
-    top_bar = input["top_bar"]
-    scatter_T = input["scatter_T"]
-end
+# Redundant!!
+#if haskey(input, "boltzmann")
+#    temp = input["boltzmann"]
+#    wf0 = construct_HarmWP(temp, x0, k_harm, μ, x_space)
+#end
 
 # Initialize output:
 N_records = Int(fld(tmax/dt, stride))   # Number of records in output files
 data = Array{Complex}(undef, N_records, length(x_space))    # Ψ(t)
 cf = Array{ComplexF64}(undef, N_records)       # correlation function <ψ(0)|ψ(t)>
-dip_cf = Array{Float64}(undef, N_records)   # dipole corr.func. <ψ(0)|μ|ψ(t)>
+#dip_cf = Array{Float64}(undef, N_records)   # dipole corr.func. <ψ(0)|μ|ψ(t)>
+
+#===================================================
+            Imaginary time propagation
+===================================================#
+
+if haskey(input, "imagT")
+    println("Imaginary time propagation...")
+    (x_space, gs_potential) = read_potential(input["imagT"]["gs_potential"])
+    dtim = input["imagT"]["dt"]
+    tmaxim = input["imagT"]["tmax"]
+    if haskey(input["imagT"], "dt") && haskey(input["imagT"], "tmax")
+        wf0 = imTime_propagation(wf0, gs_potential, dtim, tmaxim)
+    else
+        wf0 = imTime_propagation(wf0, gs_potential)
+    end
+end
 
 
 #===================================================
@@ -301,8 +313,7 @@ t = 0
 wf = wf0 
 
 while t < tmax
-    global wf
-    global t, istep
+    global wf, t, istep
     
     # Propagate the wavepacket:
     wf  = propagate(potential, p, x_space, dt, wf)
@@ -312,10 +323,7 @@ while t < tmax
     if mod(istep, stride) == 0
         i_rec = Int(istep/stride)
         data[i_rec, :] = wf 
-        cf[i_rec] = abs(dot(wf0, wf))
-        if haskey(input, "dipole")
-            dip_cf[i_rec] = Float64(dot(wf0, dipole .* wf))
-        end
+        cf[i_rec] = abs.(dot(wf0, wf))
     end
     istep += 1
 end
@@ -332,11 +340,14 @@ compute_spectrum(cf, dt*stride/fs_to_au)
 
 # Compute reflection and transmission coefficients
 if haskey(input, "scatter")
+    top_bar = input["top_bar"]
+    scatter_T = input["scatter_T"]
     tr_re(data, x_space, top_bar, scatter_T, dt, stride)
 end
 
 # Compute electron absorption spectrum
-if vibres
-    zpe = 1/2/pi*sqrt(k_harm/μ) * fs_to_au * 1e15
-    electronic_spectrum(cf, dt*stride/fs_to_au, zpe , "vibres-spectrum")
+if haskey(input, "vibronic")
+    zpe = 1/2/pi*sqrt(k_harm/μ) * fs_to_au*1e15/c    # Estimate ZPE
+    maxWn = input["vibronic"]["wn_max"]
+    compute_spectrum(cf, dt*stride/fs_to_au; maxWn, zpe)
 end
