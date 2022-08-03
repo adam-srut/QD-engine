@@ -216,26 +216,41 @@ function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number,
     end
 end
 
-function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number=1.0, tmax::Number=500)
+function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number=1.0, tmax::Number=10000)
     #= Function will propagate an arbitrary WF in imaginary time.
-        Use to determine the initial WP.
-        NOTE: Does not conserve norm!!! =#
+        Use to determine the initial WP. =#
     t = 0
     wf = wf0
 
     while t < tmax
         wf = propagate(gs_potential, p, x_space, -dt*im, wf)
+        wf = wf/sqrt(dot(wf,wf)) 
         t += dt
     end
     open("init-WF.dat", "w") do file
         head = @sprintf "#%15s%16s%16s%16s\n" "x [Bohr]" "real" "imag" "P.Amp."
         write(file, head)
+        pAmp = conj(wf) .* wf
         for i in 1:length(wf)
-            line = @sprintf "%16.5e%16.5e%16.7e%16.5e\n" x_space[i] real(wf[i]) imag(wf[i]) conj(wf[i])*wf[i]
+            line = @sprintf "%16.5e%16.5e%16.7e%16.5e\n" x_space[i] real(wf[i]) imag(wf[i]) pAmp[i]
             write(file, line)
         end
     end
     return wf
+end
+
+function compute_energy(wf::Array, potential::Array{Float64}, p::Float64)
+    #= Evaluate < ψ | H | ψ > using the Direct Fourier method =#
+    N = length(potential)
+    i_k = -N/2:N/2-1
+    ket = potential .* wf
+    ket = fft(ket)
+    ket = fftshift(ket)
+    ket = p * i_k.^2 .* ket
+    ket = fftshift(ket)
+    ket = ifft(ket)
+    energy = dot(wf,ket)/dot(wf,wf)
+    return energy
 end
 
 function construct_HarmWP(temp::Number, x0::Float64, k::Float64, μ::Float64,
@@ -263,12 +278,13 @@ input = YAML.load_file("input.yml")
 
 # Essential parameters
 (x_space, potential) = read_potential(input["potential"])
+dx = abs(x_space[2]-x_space[1])
 μ = input["mass"] * μ_to_me
 k_harm = input["initWF"]["k_harm"]
 x0 = input["initWF"]["initpos"]
 wf0 = exp.( -(1/2*sqrt(μ*k_harm) * (x_space .- x0).^2 ))
 wf0 = wf0/sqrt(dot(wf0,wf0))
-p = (1/2/μ)*(1/(x_space[end] - x_space[1]))^2        # Constant for kinetic energy propagation
+p = (1/2/μ)*( 1/(dx * length(x_space)) )^2        # Constant for kinetic energy propagation
 dt = input["params"]["dt"]
 stride = input["params"]["stride"]
 tmax = input["params"]["tmax"]
@@ -284,7 +300,6 @@ tmax = input["params"]["tmax"]
 N_records = Int(fld(tmax/dt, stride))   # Number of records in output files
 data = Array{Complex}(undef, N_records, length(x_space))    # Ψ(t)
 cf = Array{ComplexF64}(undef, N_records)       # correlation function <ψ(0)|ψ(t)>
-#dip_cf = Array{Float64}(undef, N_records)   # dipole corr.func. <ψ(0)|μ|ψ(t)>
 
 #===================================================
             Imaginary time propagation
@@ -293,9 +308,9 @@ cf = Array{ComplexF64}(undef, N_records)       # correlation function <ψ(0)|ψ(
 if haskey(input, "imagT")
     println("Imaginary time propagation...")
     (x_space, gs_potential) = read_potential(input["imagT"]["gs_potential"])
-    dtim = input["imagT"]["dt"]
-    tmaxim = input["imagT"]["tmax"]
     if haskey(input["imagT"], "dt") && haskey(input["imagT"], "tmax")
+        dtim = input["imagT"]["dt"]
+        tmaxim = input["imagT"]["tmax"]
         wf0 = imTime_propagation(wf0, gs_potential, dtim, tmaxim)
     else
         wf0 = imTime_propagation(wf0, gs_potential)
@@ -336,7 +351,6 @@ println("Analyzing and saving...")
 save_data(data, x_space, dt)            # Save |Ψ(x,t)|² and |Ψ(k,t)|²
 save_vec(cf, "corrF.dat", dt )          # Save |<ψ(0)|ψ(t)>|
 compute_spectrum(cf, dt*stride/fs_to_au)
-#compute_spectrum(dip_cf, dt*stride/fs_to_au, "dip-spectrum")
 
 # Compute reflection and transmission coefficients
 if haskey(input, "scatter")

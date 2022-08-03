@@ -1,7 +1,7 @@
 # Input file for One-dimensional Quantum Dynamics Engine
 
 # File with a potential (format: position [Bohr], energy [Hartree])
-potential : "potential-MarcusModel.dat"
+potential : "Ex-potential-MarcusModel.dat"
 
 # Mass of the particle (mu)
 mass : 14.2480094
@@ -10,14 +10,24 @@ mass : 14.2480094
 params:
   dt: 1.0 
   tmax: 50000
-  stride: 20
+  stride: 10
 
 # Initial condition WF(t=0) = exp( -(1/2*sqrt(mu*k_harm) * (x - x0)^2 )
 initWF:
-  initpos: -0.05      # Position of the Gaussian WP (x0)
+  initpos: 0.0      # Position of the Gaussian WP (x0)
   k_harm: 1.21425   # Harmonic force constant, sigma = 1/sqrt(k_harm * mu) 
 
 # Compute transmission and reflection coefficients:
 #scatter:
 #  delim: 0.113      # Where to divide the potential
 #  scatter_t: 4510   # Time right after the scattering event
+
+# Calculate vibronic spectrum:
+vibronic:
+  wn_max: 20000
+
+# Imaginary time-propagation
+imagT:
+  gs_potential: "potential-MarcusModel.dat"
+#  dt: 1.0          # Default: 1
+#  tmax: 100000      # Default: 5000
