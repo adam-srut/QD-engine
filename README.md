@@ -1,3 +1,3 @@
-# 1dqd - Quantum dynamics engine for one-dimensional systems
+# 1dqd - Quantum dynamics engine for one dimensional systems
 
 ### Under constructiion!
