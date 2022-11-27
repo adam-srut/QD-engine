@@ -6,8 +6,8 @@ using LinearAlgebra, FFTW
 using Statistics
 using YAML
 using Printf
-#using SpecialPolynomials
-
+using SpecialPolynomials
+using UnicodePlots
 
 #===================================================
                 Basic constants
@@ -23,6 +23,101 @@ e = 1.60218e-19                 # e⁻ charge
 h = 6.62607e-34                 # Planck constant
 kB = 3.16681e-6                 # Boltzmann constant in a.u.
 
+
+#===================================================
+                    INFO section
+===================================================#
+function print_hello()
+    hello = """
+
+\t#====================================================
+\t     One-dimensional Quantum Dynamics Engine
+\t====================================================#
+\t
+\t               Don't Panic!
+
+   """
+   println(hello)
+end
+
+function print_init()
+    ω = sqrt(k_harm/μ)
+    ν = ω/2/pi * fs_to_au*1e15/c
+    println("\n    Basic information:\n")
+    println("""\tUsing Direct Fourier Method for propagation.
+            \t  See Kosloff & Kosloff J. Chem. Phys. 79(4), 1983.\n""")
+    println(@sprintf "\t Particle mass:%8.4f amu" μ/μ_to_me )
+    println("\t Using Gaussian WP at t=0:")
+    println(@sprintf "\t\t%-20s%12.3f Bohrs" "centered at:" x0 )
+    println(@sprintf "\t\t%-20s%12.3f cm⁻¹" "harm. freq.:" ν )
+    println(@sprintf "\t\t%-20s%12.3f Bohrs\n" "FWHM:" 2*sqrt(2*log(2))/(k_harm*μ)^(1/4) )
+    println(@sprintf "\t%-20s%12.2f a.u." "Timestep:" dt )
+    println(@sprintf "\t%-20s%12.f a.u." "tₘₐₓ:" tmax )
+    println(@sprintf "\t%-20s%12d" "stride:" stride )
+    println(@sprintf "\t%-20s%12.2e Bohrs" "Grid spacing:" dx )
+    println(@sprintf "\t%-20s%12d" "Grid points:" length(potential) )
+    println(@sprintf "\t%-20s%12.4f a.u." "Maximal momentum:" 1/2/dx )
+    println(@sprintf "\n\t%-22s%12s\n" "Potential taken from:" input["potential"] )
+       
+    println("\t" * "*"^60)
+    println("\tInitial condition:\n")
+    
+    plt_min = Int(round(0.1*length(x_space)))
+    plt_max = Int(round(0.9*length(x_space)))
+    pot_max = max(potential[plt_min:plt_max]...)
+    pot_min = min(potential[plt_min:plt_max]...)
+    wf_max = max(wf0...)
+    initPlot = lineplot(x_space[plt_min:plt_max], potential[plt_min:plt_max], 
+                       canvas=BrailleCanvas,
+                       border=:ascii, color=:white, name="potential",
+                       xlabel="Distance [Bohrs]", ylabel="Energy [Hartree]",
+                       height=10, grid=false, compact=true, blend=false)
+    wf_rescale = 0.5*(pot_max - pot_min)/wf_max
+    wf_to_plot = wf0 * wf_rescale .+ 1.1*pot_min
+    lineplot!(initPlot, x_space, wf_to_plot, color=:cyan, name="WF(t=0)") 
+    println(initPlot)
+    println("\t" * "*"^60)
+end
+
+function print_run()
+    message = """
+
+\t#====================================================
+\t              Running dynamics:
+\t====================================================#
+
+"""
+    println(message)
+end
+
+function print_analyses()
+    message = """
+
+\t#====================================================
+\t              Analyzing and saving:
+\t====================================================#
+
+\tWP propability amplitudes written to "PAmp.dat"
+\t  in momentum representation written to "PAmp-kspace.dat"
+
+\tAnalyses requested:
+"""
+    println(message)
+    println("\t" * "*"^60)
+    println(@sprintf "\t\t%-22s%20s" "Type" "Destination file")
+    println("\t" * "*"^60)
+    println(@sprintf "\t\t%-22s%20s" "pos-pos corr. func." "corrF.dat")
+    if haskey(input, "vibronic")
+        println(@sprintf "\t\t%-22s%20s" "vibronic spectrum:" "spectrum.dat")
+    else
+        println(@sprintf "\t\t%-22s%20s" "energy levels:" "spectrum.dat")
+    end
+    if haskey(input, "scatter")
+        println(@sprintf "\t\t%-22s" "Scattering analysis")
+        println(@sprintf "\t\t%42s" "reflection-transmission_CFs.dat")
+        println(@sprintf "\t\t%42s" "reflection-transmission_coeffs.dat")
+    end
+end
 
 #===================================================
                 Function section
@@ -45,8 +140,6 @@ function read_potential(filepath::String)
         return (x_axis, potential)
     end
 end
-
-
 
 function propagate(potential::Array{Float64}, p::Float64,
         x_space::Array, dt::Number, wf::Array)
@@ -124,7 +217,7 @@ function save_vec(cf::Array, filename::String, dt::Float64)
         header = "# time [fs] val\n"
         write(file, header)
         for (i, val) in enumerate(cf)
-            time = @sprintf "%12.4f" i*stride*dt/fs_to_au
+            time = @sprintf "%12.4f" (i-1)*stride*dt/fs_to_au
             write(file, time)
             val = @sprintf "%12.7f\n" val
             write(file, val)
@@ -132,21 +225,22 @@ function save_vec(cf::Array, filename::String, dt::Float64)
     end
 end
 
-function compute_spectrum(cf::Array, timestep::Number; maxWn::Number=4000, zpe::Number=0)
+function compute_spectrum(cf::Array, timestep::Number; 
+        maxWn::Number=4000, zpe::Number=0, name::String="spectrum")
     #= Compute spectrum from auto-correlation function.
         cf => Complex array
         timestep => dt*stride in fs 
         upperBound => save spectrum up to certain wavenumber =#
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*5) ]
-    spectrum = real.(fft(cf)) .^ 2
+    spectrum = abs.(fft(cf)) .^ 2
     dv = 1/(length(cf)*timestep*1e-15)
     wns = [ zpe + i*dv/c for i in 0:length(cf)-1 ]
     spectrum = wns .* spectrum
     spectrum = spectrum/norm(spectrum)
     nyquist = 1/(timestep*1e-15)/2/c
      
-    open("spectrum.dat", "w") do file
+    open("$name.dat", "w") do file
         head = @sprintf "# Nyquist freq. = %12.5e [cm⁻¹]\n#%11s%12s\n" nyquist "wn. [cm⁻¹]" "Amplitude"
         write(file, head)
         for (wn, val) in zip(wns, spectrum)
@@ -224,7 +318,7 @@ function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number
 
     while t < tmax
         wf = propagate(gs_potential, p, x_space, -dt*im, wf)
-        wf = wf/sqrt(dot(wf,wf)) 
+        wf = wf/sqrt(dot(wf,wf))    # Propagation in imag. time is not norm-conserving
         t += dt
     end
     open("init-WF.dat", "w") do file
@@ -240,7 +334,8 @@ function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number
 end
 
 function compute_energy(wf::Array, potential::Array{Float64}, p::Float64)
-    #= Evaluate < ψ | H | ψ > using the Direct Fourier method =#
+    #= Evaluate < ψ | H | ψ > using the Direct Fourier method 
+        Requires wavefunction, potential and propagation constant as an input.=#
     N = length(potential)
     i_k = -N/2:N/2-1
     ket = potential .* wf
@@ -253,54 +348,50 @@ function compute_energy(wf::Array, potential::Array{Float64}, p::Float64)
     return energy
 end
 
-function construct_HarmWP(temp::Number, x0::Float64, k::Float64, μ::Float64,
-        x_space::Array{Float64})
-    #= Redundant function. Use of SpecitalPolynomials is needed.=#
-    chi(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) * basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
-    energy(n::Int) = sqrt(k/μ) * (n+1/2)
-    Z(temp::Number) = 1/(1 - exp( -(sqrt(k/μ)/kB/temp) ) )
-    wf0 = zeros(length(x_space))
-    for n in 1:10
-        pop = exp( -( (energy(n-1) - energy(0))/kB/temp ) )/Z(temp)
-        wfn = map( x -> -1*pop*chi(n-1, x), x_space)
-        wf0 += wfn
-    end
-    wf0 = wf0/sqrt(dot(wf0, wf0)) 
-    return wf0
+function create_harm_state(n::Int, x_space::Array{Float64}, x0::Number,
+        k::Number, μ::Number)
+    #= Function returns the harmonic vibrational level.
+     Force constant k, mass μ and centre x0 have to be specified. =#
+    chi(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) * 
+        basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * 
+        exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
+    wf = [ chi(n, i) for i in x_space ]
+    wf = wf / sqrt(dot(wf, wf))
+    return wf
 end
+
+
+
 
 #===================================================
                 Prepare dynamics 
 ===================================================#
+
+print_hello()
 
 # Read input:
 input = YAML.load_file("input.yml")
 
 # Essential parameters
 (x_space, potential) = read_potential(input["potential"])
-dx = abs(x_space[2]-x_space[1])
-μ = input["mass"] * μ_to_me
-k_harm = input["initWF"]["k_harm"]
-x0 = input["initWF"]["initpos"]
-wf0 = exp.( -(1/2*sqrt(μ*k_harm) * (x_space .- x0).^2 ))
-wf0 = wf0/sqrt(dot(wf0,wf0))
-p = (1/2/μ)*( 1/(dx * length(x_space)) )^2        # Constant for kinetic energy propagation
-dt = input["params"]["dt"]
+dx = abs(x_space[2]-x_space[1])                     # Grid spacing
+μ = input["mass"] * μ_to_me                         # Mass in a.u.
+k_harm = input["initWF"]["k_harm"]                  # Force constant for harmonic ground state
+x0 = input["initWF"]["initpos"]                     # Inital centre of the wave-packet
+wf0 = create_harm_state(0, x_space, x0, k_harm, μ)  # WF(t=0)
+p = (1/2/μ)*( 1/(dx * length(x_space)) )^2          # Constant for kinetic energy propagation
+dt = input["params"]["dt"]                  
 stride = input["params"]["stride"]
 tmax = input["params"]["tmax"]
 
-# Construct initial WP as a superposition of harmonic states weighted by Boltzmann factors
-# Redundant!!
-#if haskey(input, "boltzmann")
-#    temp = input["boltzmann"]
-#    wf0 = construct_HarmWP(temp, x0, k_harm, μ, x_space)
-#end
 
 # Initialize output:
-N_records = Int(fld(tmax/dt, stride))   # Number of records in output files
+N_records = Int(fld(tmax/dt, stride)) + 1      # Number of records in output files
 data = Array{Complex}(undef, N_records, length(x_space))    # Ψ(t)
 cf = Array{ComplexF64}(undef, N_records)       # correlation function <ψ(0)|ψ(t)>
 
+# Echo input
+print_init()
 #===================================================
             Imaginary time propagation
 ===================================================#
@@ -322,10 +413,13 @@ end
                 Execute dynamics
 ===================================================#
 
-println("Running dynamics...")
+print_run()
 istep = 1
 t = 0
 wf = wf0 
+
+data[1, :] = wf
+cf[1] = abs(dot(wf0, wf))
 
 while t < tmax
     global wf, t, istep
@@ -336,9 +430,9 @@ while t < tmax
     
     # Save data:
     if mod(istep, stride) == 0
-        i_rec = Int(istep/stride)
+        i_rec = Int(istep/stride) + 1
         data[i_rec, :] = wf 
-        cf[i_rec] = abs.(dot(wf0, wf))
+        cf[i_rec] = abs(dot(wf0, wf))
     end
     istep += 1
 end
@@ -347,7 +441,7 @@ end
             Analyze and save the results
 ===================================================#
 
-println("Analyzing and saving...")
+print_analyses()
 save_data(data, x_space, dt)            # Save |Ψ(x,t)|² and |Ψ(k,t)|²
 save_vec(cf, "corrF.dat", dt )          # Save |<ψ(0)|ψ(t)>|
 compute_spectrum(cf, dt*stride/fs_to_au)
@@ -361,7 +455,10 @@ end
 
 # Compute electron absorption spectrum
 if haskey(input, "vibronic")
-    zpe = 1/2/pi*sqrt(k_harm/μ) * fs_to_au*1e15/c    # Estimate ZPE
+    zpe = 1/4/pi*sqrt(k_harm/μ) * fs_to_au*1e15/c    # Compute ZPE
     maxWn = input["vibronic"]["wn_max"]
     compute_spectrum(cf, dt*stride/fs_to_au; maxWn, zpe)
 end
+
+# End of program:
+println("\nAll done!\n")
