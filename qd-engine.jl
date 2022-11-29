@@ -109,7 +109,11 @@ function print_analyses()
     println(@sprintf "\t\t%-22s%20s" "pos-pos corr. func." "corrF.dat")
     if haskey(input, "vibronic")
         println(@sprintf "\t\t%-22s%20s" "vibronic spectrum:" "spectrum.dat")
-    else
+    elseif haskey(input, "resonanceRaman")                                     
+        println(@sprintf "\t\t%-22s%20s" "resonance Raman:" "resRaman.dat")    
+        println(@sprintf "\t\t%-22s%20s" "energy levels:" "spectrum.dat")
+        println(@sprintf "\t\t%-22s%20s" "0→ 1 Raman overlap:" "Raman-CF.dat")
+   else
         println(@sprintf "\t\t%-22s%20s" "energy levels:" "spectrum.dat")
     end
     if haskey(input, "scatter")
@@ -459,6 +463,23 @@ if haskey(input, "vibronic")
     maxWn = input["vibronic"]["wn_max"]
     compute_spectrum(cf, dt*stride/fs_to_au; maxWn, zpe)
 end
+
+
+# Heller method for resonance Raman excitation profile
+# Note: μ_ρ = μ_λ = 1
+if haskey(input, "resonanceRaman")
+    maxWn = input["resonanceRaman"]["wn_max"]       # Maximal wavenumber in the final spectrum
+    zpe = 1/4/pi*sqrt(k_harm/μ) * fs_to_au*1e15/c   # Compute ZPE
+    cf = Array{Float64}(undef, N_records)           # Initialize correlation function
+    final_state = create_harm_state(1, x_space, x0, k_harm, μ) # Create final scattering states  
+    # Compute cross-correlation function:
+    for (i, wf_t) in enumerate(eachrow(data))
+        cf[i] = abs(dot(final_state, wf_t))
+    end
+    save_vec(cf, "Raman-CF.dat", dt )
+    compute_spectrum(cf, dt*stride/fs_to_au; zpe=zpe, name="resRaman", maxWn=maxWn)
+end
+
 
 # End of program:
 println("\nAll done!\n")
