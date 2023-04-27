@@ -44,8 +44,10 @@ function print_init()
     ω = sqrt(k_harm/μ)
     ν = ω/2/pi * fs_to_au*1e15/c
     println("\n    Basic information:\n")
-    println("""\tUsing Direct Fourier Method for propagation.
-            \t  See Kosloff & Kosloff J. Chem. Phys. 79(4), 1983.\n""")
+    println("""\tUsing Direct Fourier Method for propagation, see:
+            \t  Kosloff & Kosloff J. Chem. Phys., 79(4), 1983.\n
+            \tfor the split operator formalism see:
+            \t  Feit, Fleck & Steiger, J. Comput. Phys., 1982, 47, 412–433.\n""")
     println(@sprintf "\t Particle mass:%8.4f amu" μ/μ_to_me )
     println("\t Using Gaussian WP at t=0:")
     println(@sprintf "\t\t%-20s%12.3f Bohrs" "centered at:" x0 )
@@ -155,21 +157,23 @@ function propagate(potential::Array{Float64}, p::Float64,
         x_space => Array of spatial coordinates
         dt => time increment 
         wf => wavefunction at time t (Complex array)
-        TODO: ADD PREPARED FFT=#
+        TODO: ADD PREPARED FFT
+              Change order of exp(-i/h T) and exp(-i/h V) =#
     
     N = length(x_space)
-    i_k = -N/2:N/2-1       
+    i_k = -N/2:N/2-1
+    wf = wf .* exp.( -(im*potential/2*dt) )
     wf = fft(wf)
     wf = fftshift(wf)
-    wf = wf .* exp.( -(im*p*dt/2) * i_k.^2 )
+    wf = wf .* exp.( -(im*p*dt) * i_k.^2 )
     wf = fftshift(wf)
     wf = ifft(wf)
-    wf = wf .* exp.( -(im*potential*dt) )
-    wf = fft(wf)
-    wf = fftshift(wf)
-    wf = wf .* exp.( -(im*p*dt/2) * i_k.^2 )
-    wf = fftshift(wf)
-    wf = ifft(wf)
+    wf = wf .* exp.( -(im*potential/2*dt) )
+#    wf = fft(wf)
+#    wf = fftshift(wf)
+#    wf = wf .* exp.( -(im*p*dt/2) * i_k.^2 )
+#    wf = fftshift(wf)
+#    wf = ifft(wf)
     return wf 
 end
 
@@ -234,7 +238,8 @@ function compute_spectrum(cf::Array, timestep::Number;
     #= Compute spectrum from auto-correlation function.
         cf => Complex array
         timestep => dt*stride in fs 
-        upperBound => save spectrum up to certain wavenumber =#
+        upperBound => save spectrum up to certain wavenumber 
+        TODO: add lineshape function =#
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*5) ]
     spectrum = abs.(fft(cf)) .^ 2
@@ -261,7 +266,8 @@ function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number,
         dt::Float64, stride::Int)
     #=  Compute the transmission and reflection coeffs. as a function of energy.
         Space has to be divided by the top of the barrier and time after a scattering event needs to be specified.
-        Whole procedure is describe in Tannor (2007) Introduction to Quantum Mechanics: A time-dependent perspective; Section 7.1.1 =#
+        Whole procedure is describe in Tannor (2007) Introduction to Quantum Mechanics: A time-dependent perspective; Section 7.1.1 
+        OBSOLETE FUNTION =#
     dx = (x_space[end] - x_space[1])/(length(x_space)-1)
     delim_i = Int(round((delim - x_space[1])/dx))
     T_i = Int(round(T/dt/stride))
@@ -364,7 +370,41 @@ function create_harm_state(n::Int, x_space::Array{Float64}, x0::Number,
     return wf
 end
 
+function get_eigenfunctions(wf::Array, x_space::Array{Float64}, energies::Array)
+    #= Function compute and save vibrational eigenstates.
+        Perform FT of ψ(x,t) along time axis.
+        Only certain energies will be computed.
+        Energies are expected in cm-1 
+        TODO: add to interface =#
 
+    (N_t, N_x) = size(wf)
+    eigenstates = Array{ComplexF64}(undef, length(energies), N_x)
+    for (i,energy) in enumerate(energies)
+        freq = energy*c*1e-15/fs_to_au
+        eigenstate = zeros(N_x)
+        for (time,wp) in enumerate(eachrow(wf))
+            t = (time-1)*stride*dt
+            eigenstate = eigenstate + wp*exp(-im*freq*time)
+        end
+        eigenstates[i,:] = eigenstate
+    end
+    # Save FT of the wavepacket
+    open("eigenstates.txt", "w") do file
+        head = @sprintf "#%13s" " "
+        head *= join([ @sprintf "%20.2f%8s" e " " for e in energies])
+        head *= "\n"
+        write(file, head)
+        for (i, x) in enumerate(x_space)
+            line = @sprintf "%14.4f" x
+            for i_state in 1:length(energies)
+                val = eigenstates[i_state, i]
+                line *= @sprintf "%14.4f%14.4f" real(val) angle(val)
+            end
+            line *= "\n"
+            write(file, line)
+        end
+     end
+end
 
 
 #===================================================
@@ -480,6 +520,11 @@ if haskey(input, "resonanceRaman")
     compute_spectrum(cf, dt*stride/fs_to_au; zpe=zpe, name="resRaman", maxWn=maxWn)
 end
 
+
+# Save eigenstates
+println("\nComputing eigenstates:\n")
+energies = [150.0, 175.0, 328.0, 366.4 ]
+get_eigenfunctions(data, x_space, energies)
 
 # End of program:
 println("\nAll done!\n")
