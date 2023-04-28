@@ -9,6 +9,12 @@ using Printf
 using SpecialPolynomials
 using UnicodePlots
 
+#=
+  TODO:
+    - Try relaxation method to find eigenstates.
+    - Use proper normalization, e.g. trapezoidal rule
+=#
+
 #===================================================
                 Basic constants
 ===================================================#
@@ -157,8 +163,7 @@ function propagate(potential::Array{Float64}, p::Float64,
         x_space => Array of spatial coordinates
         dt => time increment 
         wf => wavefunction at time t (Complex array)
-        TODO: ADD PREPARED FFT
-              Change order of exp(-i/h T) and exp(-i/h V) =#
+        TODO: ADD PREPARED FFT =#
     
     N = length(x_space)
     i_k = -N/2:N/2-1
@@ -169,11 +174,6 @@ function propagate(potential::Array{Float64}, p::Float64,
     wf = fftshift(wf)
     wf = ifft(wf)
     wf = wf .* exp.( -(im*potential/2*dt) )
-#    wf = fft(wf)
-#    wf = fftshift(wf)
-#    wf = wf .* exp.( -(im*p*dt/2) * i_k.^2 )
-#    wf = fftshift(wf)
-#    wf = ifft(wf)
     return wf 
 end
 
@@ -262,74 +262,29 @@ function compute_spectrum(cf::Array, timestep::Number;
     end
 end
 
-function tr_re(wf::Array, x_space::Array, delim::Float64, T::Number, 
-        dt::Float64, stride::Int)
-    #=  Compute the transmission and reflection coeffs. as a function of energy.
-        Space has to be divided by the top of the barrier and time after a scattering event needs to be specified.
-        Whole procedure is describe in Tannor (2007) Introduction to Quantum Mechanics: A time-dependent perspective; Section 7.1.1 
-        OBSOLETE FUNTION =#
-    dx = (x_space[end] - x_space[1])/(length(x_space)-1)
-    delim_i = Int(round((delim - x_space[1])/dx))
-    T_i = Int(round(T/dt/stride))
-    tr_ref = wf[T_i, delim_i+1:end]
-    re_ref = wf[T_i, 1:delim_i]
-    cf_len = length(eachrow(wf)) - T_i + 1
-    cf_re = Array{Float64}(undef, cf_len)
-    cf_tr = Array{Float64}(undef, cf_len)
-    cf_wf = Array{Float64}(undef, cf_len)
-    # Function for <ψ(T)|ψ(T+t)>
-    cf_t(wf_t::Array, wf_ref::Array) = abs(dot( wf_ref, wf_t))
-    # Compute the correlation function with time T as reference:
-    for (i,t) in enumerate(eachrow(wf[T_i:end,:]))
-        tr = t[delim_i+1:end]
-        re = t[1:delim_i]
-        (re_ovl, tr_ovl, wf_ovl) = [ cf_t(re, re_ref), cf_t(tr, tr_ref), cf_t( t[:], wf[T_i,:]) ]
-        cf_re[i] = re_ovl
-        cf_tr[i] = tr_ovl
-        cf_wf[i] = wf_ovl
-    end
-    # Save results:
-    open("reflection-transmission_CFs.dat", "w") do file
-        head = @sprintf "#%13s%14s%14s%14s\n" "time [fs]" "total" "reflected" "transmitted"
-        write(file, head)
-        for itime in 1:cf_len
-            time = (itime-1)*stride*dt/fs_to_au
-            line = @sprintf "%14.4f%14.7f%14.7f%14.7f\n" time cf_wf[itime] cf_re[itime] cf_tr[itime]
-            write(file, line)
-        end
-    end
-    # Compute transmission and reflection coefficients
-    do_spec(cf::Array) = abs.(fft( [ cf .- mean(cf); zeros(length(cf)*3) ] ))
-    σTr = do_spec(cf_tr) 
-    σRe = do_spec(cf_re)
-    σTot = σTr + σRe
-    re_E = σRe ./ σTot
-    tr_E = σTr ./ σTot
-    dE = 1/(length(cf)*stride*dt/fs_to_au*1e-15)*h/e # dE in eV
-    engs = [ i*dE for i in 0:length(σTot)-1 ]
-    open("reflection-transmission_Coeffs.dat", "w") do file
-        head = @sprintf "#%13s%14s%14s%14s%14s%14s\n" "Energy [eV]" "σTot" "σRe" "σTr" "Re" "Tr"
-        write(file, head)
-        for i in 1:length(engs)
-            if engs[i] > 5
-                break
-            end
-            line = @sprintf "%14.4f%14.7f%14.7f%14.7f%14.7f%14.7f\n" engs[i] σTot[i] σRe[i] σTr[i] re_E[i] tr_E[i]
-            write(file, line)
-        end
-    end
-end
 
-function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number=1.0, tmax::Number=10000)
+
+function imTime_propagation(wf0::Array, gs_potential::Array{Float64}, dt::Number=1.0, tmax::Number=5000)
     #= Function will propagate an arbitrary WF in imaginary time.
         Use to determine the initial WP. =#
     t = 0
     wf = wf0
+    # Set up progress bar
+    N_steps = tmax/dt
+    bar_stride = div(N_steps,10)
+    print("\t  Progress:\n\t    0%")
+    progress = 1
 
     while t < tmax
         wf = propagate(gs_potential, p, x_space, -dt*im, wf)
         wf = wf/sqrt(dot(wf,wf))    # Propagation in imag. time is not norm-conserving
         t += dt
+        
+        # Update progress bar
+        if mod(t*dt, bar_stride) == 0
+            print( @sprintf "%2d%%" 10*progress)
+            progress += 1
+        end
     end
     open("init-WF.dat", "w") do file
         head = @sprintf "#%15s%16s%16s%16s\n" "x [Bohr]" "real" "imag" "P.Amp."
@@ -441,7 +396,7 @@ print_init()
 ===================================================#
 
 if haskey(input, "imagT")
-    println("Imaginary time propagation...")
+    println("\tImaginary time propagation...")
     (x_space, gs_potential) = read_potential(input["imagT"]["gs_potential"])
     if haskey(input["imagT"], "dt") && haskey(input["imagT"], "tmax")
         dtim = input["imagT"]["dt"]
@@ -465,8 +420,14 @@ wf = wf0
 data[1, :] = wf
 cf[1] = abs(dot(wf0, wf))
 
+# Set up progress bar
+N_steps = tmax/dt
+bar_stride = div(N_steps,10)
+print("\t  Progress:\n\t    0%")
+progress = 1
+
 while t < tmax
-    global wf, t, istep
+    global wf, t, istep, progress # take vars from the global scope
     
     # Propagate the wavepacket:
     wf  = propagate(potential, p, x_space, dt, wf)
@@ -479,7 +440,15 @@ while t < tmax
         cf[i_rec] = abs(dot(wf0, wf))
     end
     istep += 1
+
+    # Update progress bar
+    if mod(istep, bar_stride) == 0
+        print( @sprintf "%2d%%" 10*progress)
+        progress += 1
+    end
 end
+
+println("\n")
 
 #===================================================
             Analyze and save the results
@@ -523,7 +492,7 @@ end
 
 # Save eigenstates
 println("\nComputing eigenstates:\n")
-energies = [150.0, 175.0, 328.0, 366.4 ]
+energies = [0.0, 208.0, 416.0, 832.0 ]
 get_eigenfunctions(data, x_space, energies)
 
 # End of program:
