@@ -7,7 +7,7 @@ function print_hello()
     hello = """
 
 \t#====================================================
-\t     One-dimensional Quantum Dynamics Engine
+\t            Quantum Dynamics Engine
 \t====================================================#
 \t
 \t               Don't Panic!
