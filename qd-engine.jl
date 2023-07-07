@@ -1,6 +1,6 @@
 #! /usr/bin/env julia 
 
-println("Loading packages...")
+#println("Loading packages...")
 using LinearAlgebra, FFTW
 using OffsetArrays
 using Statistics
@@ -10,8 +10,7 @@ using Printf
 using SpecialPolynomials
 using UnicodePlots
 using ArgParse
-using Trapz
-include("info.jl")
+using Dates
 
 FFTW.set_num_threads(1)
 
@@ -24,13 +23,16 @@ FFTW.set_num_threads(1)
         - CF + IO [x]
         - WF + IO [x]
         - spectra + IO [x]
+        - lineshape function 
         - eigenstates + IO (see Feit & Fleck paper)
-    - Info section
-    - Try relaxation method to find eigenstates.
-    - Use proper normalization, e.g. trapezoidal rule 
+    - Info section [x]
     - Add benchmark of Nr of grid points [x]
-    - Add fail checker - Nyquist + ΔE_min
-    - Ommit global variables? [x]
+    - Add fail checker - Nyquist + ΔE_min [x]
+        - Check for WF at boundaries
+    - Add plotting routines
+    - Add interpolation scheme [x]
+        - Support for irregular grids
+    - Special stride for PAmp
 =#
 
 #=================================================
@@ -105,8 +107,6 @@ end
 
 mutable struct OutData
     wf::NCDataset
-    wfRe
-    wfIm
     CF::Array{ComplexF64}
     Nsteps::Int
     step_stride::Int
@@ -122,8 +122,10 @@ function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt:
         wfout.attrib["title"] = "File contains temporal evolution of the wavepacket."
         defDim(wfout, "x", length(wf0))
         defDim(wfout, "time", N_records)
-        wfRe = defVar(wfout, "wfReal", Float32, ("x", "time"), deflatelevel=0)
-        wfIm = defVar(wfout, "wfImag", Float32, ("x", "time"), deflatelevel=0)
+        defVar(wfout, "PAmp", Float32, ("x", "time"), deflatelevel=0)
+        defVar(wfout, "cfReal", Float64, ("time",), deflatelevel=0)
+        defVar(wfout, "cfImag", Float64, ("time",), deflatelevel=0)
+        defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
     elseif ndims(wf0) == 2
         (nx,ny) = size(wf0)
         wfout = NCDataset("WF.nc", "c")
@@ -131,14 +133,18 @@ function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt:
         defDim(wfout, "x", nx)
         defDim(wfout, "y", ny)
         defDim(wfout, "time", N_records)
-        wfRe = defVar(wfout, "wfReal", Float32, ("x", "y", "time"), deflatelevel=0)
-        wfIm = defVar(wfout, "wfImag", Float32, ("x", "y", "time"), deflatelevel=0)
+        defVar(wfout, "PAmp", Float32, ("x", "y", "time"), deflatelevel=0)
+        defVar(wfout, "cfReal", Float64, ("time",), deflatelevel=0)
+        defVar(wfout, "cfImag", Float64, ("time",), deflatelevel=0)
+        defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
+        defVar(wfout, "Ydim", Float64, ("y",), deflatelevel=0)
     else
         error("Wrong dimensions of the inital WF.")
     end
     cf = Array{ComplexF64}(undef, N_records)
-    return OutData(wfout, wfRe, wfIm, cf, Nsteps, step_stride, dt)
+    return OutData(wfout, cf, Nsteps, step_stride, dt)
 end
+
 
 #===================================================
              `MetaData` constructor
@@ -164,9 +170,9 @@ function MetaData(;
             return MetaData(input, potential, Array{Float64}(undef, length(potential)), x_dim, Array{Float64}(undef, length(x_dim)))
         end
     elseif input["dimensions"] == 2
-        (potential, x_dim, y_dim) = read_potential2D(input["potential"])
+        (potential, x_dim, y_dim) = read_potential(input["potential"])
         if haskey(input, "imagT")
-            (ref_potential, _, _) = read_potential2D(input["imagT"]["gs_potential"])
+            (ref_potential, _, _) = read_potential(input["imagT"]["gs_potential"])
             return MetaData(input, potential, ref_potential, x_dim, y_dim)
         else
             return MetaData(input, potential, Array{Float64}(undef, length(potential)), x_dim, y_dim)
@@ -181,52 +187,21 @@ end
 ===================================================#
 
 function read_potential(filepath::String)
-    #= Potential is given as two columns:
-        position | potential energy =#
-    open(filepath) do file
-        x_axis = Array{Float64}(undef,0)
-        potential = Array{Float64}(undef,0)
-        for line in eachline(file)
-            if startswith(line, "#")
-                continue
-            end
-            line = parse.(Float64, split(line))
-            append!(x_axis, line[1])
-            append!(potential, line[2])
+    #= Reads interpolated potential from a NetCDF file =#
+    NCDataset(filepath, "r") do potfile
+        if length(potfile.dim) == 1
+            xdim = potfile["xdim"][:]
+            potential = potfile["potential"][:]
+            return (xdim, potential)
+        elseif length(potfile.dim) == 2
+            xdim = potfile["xdim"][:]
+            ydim = potfile["ydim"][:]
+            potential = potfile["potential"][:,:]
+            return (potential, xdim, ydim)
+        else
+            @error "Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."
         end
-        return (x_axis, potential)
     end
-end
-
-function read_potential2D(filepath::String; state::Int=3)
-	#= Read 2D potential in format:
-	 x_pos | y_pos | ... | state index | ... =#
-	pot = []
-	open(filepath) do file
-		for line in eachline(file)
-			if startswith(line, "#")
-				continue
-			end
-			line = split(line)
-			vals = map( x -> parse(Float64, line[x]), [1,2, state])
-			append!(pot, [vals])
-		end
-	end
-	x_dim = sort(unique(map( x -> x[1], pot)))
-	N_x = length(x_dim)
-    dx = x_dim[2]-x_dim[1]
-	y_dim = sort(unique(map( x -> x[2], pot)))
-	N_y = length(y_dim)
-    dy = y_dim[2]-y_dim[1]
-    potential = Array{Float64}(undef, N_x, N_y)
-    for line in pot
-        x = line[1]
-        x_i = round(Int, (x - x_dim[1])/dx) + 1
-        y = line[2]
-        y_i = round(Int, (y - y_dim[1])/dy) + 1
-        potential[x_i, y_i] = line[3]
-    end
-    return (potential, x_dim, y_dim)
 end
 
 function construct_kspace(;x_dim, μx, y_dim=false, μy=false)
@@ -313,7 +288,8 @@ function create_harm_state_2D(;n::Int, xdim::Array{Float64}, ydim::Array{Float64
         basis(Hermite, n)((μy*ky)^(1/4)*(y-y0)) *
         exp( -(1/2*sqrt(μy*ky) * (y-y0)^2) )
     wf = vcat([ [chix(n, x)*chiy(n, y) for x in xdim] for y in ydim ]'...)
-    wf = wf / dot(wf, wf) .+ 0*im
+    wf = wf .+ 0*im
+    wf = wf / sqrt(dot(wf,wf))
     return wf
 end
 
@@ -355,7 +331,7 @@ function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
     isfile("initWF.nc") && rm("initWF.nc")
     NCDataset("initWF.nc", "c") do outfile
         outfile.attrib["title"] = "File contains inital WF from imaginary time propagation."
-        outfile.attrib["energy"] = "energy of the relaxed WF is: $energy cm^-1."
+        outfile.attrib["energy"] = "energy of the relaxed WF is: $energy cm⁻¹."
         if metadata.input["dimensions"] == 1
             defDim(outfile, "x", length(dynamics.wf))
             defVar(outfile, "wfRe", Float64, ("x",))
@@ -406,18 +382,20 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             dynamics = V_halfstep(dynamics)
             irec = div(dynamics.istep, dynamics.step_stride)
             if metadata.input["dimensions"] == 1
-                outdata.wfRe[:, irec] = real.(dynamics.wf)
-                outdata.wfIm[:, irec] = imag.(dynamics.wf)
+                outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
             elseif metadata.input["dimensions"] == 2
-                outdata.wfRe[:, :, irec] = real.(dynamics.wf)
-                outdata.wfIm[:, :, irec] = imag.(dynamics.wf)
+                outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
             end
-            outdata.CF[irec] = dot(wf0, dynamics.wf)
-
+            overlap = dot(wf0, dynamics.wf)
+            outdata.CF[irec] = overlap
+            outdata.wf["cfReal"][irec] = real(overlap)
+            outdata.wf["cfImag"][irec] = imag(overlap)
             dynamics = T_halfstep(dynamics)
             dynamics.istep += 1
+
         end
     end
+    dynamics = V_halfstep(dynamics)
     return outdata
 end
 
@@ -425,6 +403,13 @@ end
                 Prepare dynamics 
 ===================================================#
 
+starttime = now()
+println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+
+# Include helper functions:
+include("analysis.jl")
+include("info.jl")
+# Echo hello
 print_hello()
 
 # Essential parameters from "input.yml":
@@ -450,6 +435,7 @@ if metadata.input["dimensions"] == 1
                            metadata.input["params"]["Nsteps"], 
                            wf0, 
                            metadata.input["params"]["dt"])
+    outdata.wf["Xdim"][:] = metadata.x_dim
 elseif metadata.input["dimensions"] == 2
     # Prepare ψ(t=0):
     wf0 = create_harm_state_2D(n=0, xdim=metadata.x_dim, ydim=metadata.y_dim,
@@ -474,21 +460,19 @@ elseif metadata.input["dimensions"] == 2
                            metadata.input["params"]["Nsteps"],
                            wf0,
                            metadata.input["params"]["dt"])
+    outdata.wf["Xdim"][:] = metadata.x_dim
+    outdata.wf["Ydim"][:] = metadata.y_dim
 end
 
-#error("You shall not pass")
-# Echo input
-#print_init()
-
-# Include other functions:
-include("analysis.jl")
+# Echo init
+print_init(metadata)
 
 #===================================================
             Imaginary time propagation
 ===================================================#
 
 if haskey(metadata.input, "imagT")
-    println("\t =====> Imaginary time propagation <======")
+    println("\t========> Imaginary time propagation <=========")
     #@info "Assuming the same grid for reference and actual potential.\n"
     dynamics.potential = metadata.ref_potential
     dynamics = imTime_propagation(dynamics)
@@ -512,10 +496,13 @@ println("\n")
 
 compute_spectrum(outdata)
 save_CF(outdata)
-save_potential(metadata)
 
 # Close NetCDF file:
 close(outdata.wf)
 
-# End of program:
-println("\nAll done!\n")
+print_output()
+
+# End of the program:
+endtime = now()
+println("\n  Finished successfully " * Dates.format(endtime, "on dd/mm/yyyy at HH:MM:SS") )
+println("  Total runtime: " * Dates.format(convert(DateTime, endtime-starttime ), "HH:MM:SS") * "\n")

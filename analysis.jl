@@ -29,7 +29,7 @@ function compute_spectrum(outdata::OutData;
     spectrum2 = wns .* spectrum2
     spectrum2 = spectrum2/norm(spectrum2)
 
-    open("$name.dat", "w") do file
+    open("$name.txt", "w") do file
         head = @sprintf "# Nyquist freq. = %12.5e [cm⁻¹]\n#%15s%16s%16s\n" nyquist "wn. [cm⁻¹]" "Amp." "Amp. window."
         write(file, head)
         for (i, wn) in enumerate(wns)
@@ -64,7 +64,7 @@ function compute_energy(dynamics::Dynamics, metadata::MetaData)
     return (Venergy + Tenergy, Venergy, Tenergy).*constants["Eh_to_wn"]
 end
 
-function save_CF(outdata::OutData; filename::String="CF.dat")
+function save_CF(outdata::OutData; filename::String="CF.txt")
     #= Save an array of numbers for each timestep =#
     open(filename, "w") do file
         header = @sprintf "#%15s%16s%16s%16s\n" "time [fs]" "abs" "Re" "Im"
@@ -113,30 +113,6 @@ function get_eigenfunctions(wf::Array, x_space::Array{Float64}, energies::Array)
             end
             line *= "\n"
             write(file, line)
-        end
-    end
-end
-
-function save_potential(metadata::MetaData)
-    #= Save potential in NetCDF format =#
-    isfile("potential.nc") && rm("potential.nc")
-    NCDataset("potential.nc", "c") do file
-        file.attrib["title"] = "File with potential energy surface used in QD engine"
-        if metadata.input["dimensions"] == 1
-            defDim(file, "x", length(metadata.x_dim))
-            defVar(file, "potential", Float64, ("x",))
-            defVar(file, "xVals" , Float64, ("x",))
-            file["potential"][:] = metadata.potential
-            file["xVals"][:] = metadata.x_dim
-        elseif metadata.input["dimensions"] == 2
-            defDim(file, "x", length(metadata.x_dim))
-            defDim(file, "y", length(metadata.y_dim))
-            defVar(file, "potential", Float64, ("x", "y"))
-            defVar(file, "xVals", Float64, ("x",))
-            defVar(file, "yVals", Float64, ("y",))
-            file["potential"][:,:] = metadata.potential
-            file["xVals"][:] = metadata.x_dim
-            file["yVals"][:] = metadata.y_dim
         end
     end
 end
