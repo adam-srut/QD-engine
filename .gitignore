@@ -4,3 +4,11 @@ qd-engine-old.jl
 test
 qd-engine-resRaman.jl
 obsolete-functions.jl
+*.nc
+*.png
+.ipynb_checkpoints/
+2D-dynamics.jl
+Benchmark_development.ipynb
+theory/
+tmp.gif
+units.nb

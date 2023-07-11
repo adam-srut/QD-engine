@@ -1,18 +1,18 @@
 #! /usr/bin/env julia 
 
-#println("Loading packages...")
 using LinearAlgebra, FFTW
 using OffsetArrays
 using Statistics
 using YAML
 using NCDatasets
-using Printf
+using Printf, Dates, ArgParse
 using SpecialPolynomials
 using UnicodePlots
-using ArgParse
-using Dates
+using Trapz
 
+# Using more cores for FFTW or BLAS do not enhance performance
 FFTW.set_num_threads(1)
+BLAS.set_num_threads(1)
 
 #=
     TODO:
@@ -23,21 +23,23 @@ FFTW.set_num_threads(1)
         - CF + IO [x]
         - WF + IO [x]
         - spectra + IO [x]
-        - lineshape function 
+        - lineshape function [x] 
         - eigenstates + IO (see Feit & Fleck paper)
     - Info section [x]
     - Add benchmark of Nr of grid points [x]
     - Add fail checker - Nyquist + ΔE_min [x]
         - Check for WF at boundaries
-    - Add plotting routines
+    - Add plotting routines [x]
     - Add interpolation scheme [x]
         - Support for irregular grids
-    - Special stride for PAmp
+    - Special stride for PAmp [x]
+    - Read in relaxed ψ(t=0) from NetCDF file [x]
 =#
 
 #=================================================
             Parse arguments
 =================================================#
+
 function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
@@ -51,7 +53,6 @@ end
 
 args = parse_commandline()
 infile = args["input"]
-
 
 #===================================================
                 Basic constants
@@ -115,27 +116,24 @@ end
 
 function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt::Number)
     #= Initilize output data =#
-    N_records = Int(fld(Nsteps, step_stride)) 
+    N_records = Int(fld(Nsteps, step_stride))
+    N_records_WF = Int(fld(Nsteps, step_stride*10)) # Increase stride for saving PAmp
     isfile("WF.nc") && rm("WF.nc")
     if ndims(wf0) == 1
         wfout = NCDataset("WF.nc", "c")
         wfout.attrib["title"] = "File contains temporal evolution of the wavepacket."
         defDim(wfout, "x", length(wf0))
-        defDim(wfout, "time", N_records)
+        defDim(wfout, "time", N_records_WF) 
         defVar(wfout, "PAmp", Float32, ("x", "time"), deflatelevel=0)
-        defVar(wfout, "cfReal", Float64, ("time",), deflatelevel=0)
-        defVar(wfout, "cfImag", Float64, ("time",), deflatelevel=0)
-        defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
+       defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
     elseif ndims(wf0) == 2
         (nx,ny) = size(wf0)
         wfout = NCDataset("WF.nc", "c")
         wfout.attrib["title"] = "File contains temporal evolution of the wavepacket."
         defDim(wfout, "x", nx)
         defDim(wfout, "y", ny)
-        defDim(wfout, "time", N_records)
+        defDim(wfout, "time", N_records_WF) 
         defVar(wfout, "PAmp", Float32, ("x", "y", "time"), deflatelevel=0)
-        defVar(wfout, "cfReal", Float64, ("time",), deflatelevel=0)
-        defVar(wfout, "cfImag", Float64, ("time",), deflatelevel=0)
         defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
         defVar(wfout, "Ydim", Float64, ("y",), deflatelevel=0)
     else
@@ -144,7 +142,6 @@ function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt:
     cf = Array{ComplexF64}(undef, N_records)
     return OutData(wfout, cf, Nsteps, step_stride, dt)
 end
-
 
 #===================================================
              `MetaData` constructor
@@ -199,8 +196,26 @@ function read_potential(filepath::String)
             potential = potfile["potential"][:,:]
             return (potential, xdim, ydim)
         else
-            @error "Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."
+            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
         end
+    end
+end
+
+function read_wf(filepath::String)
+    #= Read relaxed wavefunction from NetCDF file =#
+    NCDataset(filepath, "r") do wffile
+        if length(wffile.dim) == 1
+            wfReal = wffile["wfRe"][:]
+            wfImag = wffile["wfIm"][:]
+            wf = wfReal .+ 1im*wfImag
+        elseif length(wffile.dim) == 2
+            wfReal = wffile["wfRe"][:,:]
+            wfImag = wffile["wfIm"][:,:]
+            wf = wfReal .+ 1im*wfImag
+        else
+            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(wffile.dim))."))
+        end
+        return wf
     end
 end
 
@@ -349,11 +364,12 @@ function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
             outfile["wfIm"][:,:] = imag.(dynamics.wf)
         end
     end
+    println("\t  Relaxed wavefunction saved to: `initWF.nc`")
     return dynamics
 end
 
 function execute_dynamics(dynamics::Dynamics, outdata::OutData)
-    #= Execute dynamics with predefined setup.
+    #= Execute dynamics with the predefined setup.
         Returns object `outdata` with ψ(tᵢ) and <ψ(0)|ψ(tᵢ)>
         tᵢ = Δt * step_stride * istep =#
 
@@ -362,7 +378,7 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
     
     # t=0
     wf0 = dynamics.wf
-    dynamics = T_halfstep(dynamics)
+    dynamics = T_halfstep(dynamics) # Initialize
     dynamics.istep += 1 # t0 + Δt/2
     
     # Propagation:
@@ -377,25 +393,27 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
         end
        
-        # Save data:
+        # Compute CF and save PAmp:
         if mod(dynamics.istep, dynamics.step_stride) == 0
-            dynamics = V_halfstep(dynamics)
+            dynamics = V_halfstep(dynamics) # Complete integration
             irec = div(dynamics.istep, dynamics.step_stride)
-            if metadata.input["dimensions"] == 1
-                outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
-            elseif metadata.input["dimensions"] == 2
-                outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+            outdata.CF[irec] = dot(wf0, dynamics.wf)
+           
+            # Save probability amplitude with 10*stride
+            if mod(dynamics.istep, 10*dynamics.step_stride) == 0
+                irec = div(dynamics.istep, 10*dynamics.step_stride)
+                if metadata.input["dimensions"] == 1
+                    outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                elseif metadata.input["dimensions"] == 2
+                    outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                end
             end
-            overlap = dot(wf0, dynamics.wf)
-            outdata.CF[irec] = overlap
-            outdata.wf["cfReal"][irec] = real(overlap)
-            outdata.wf["cfImag"][irec] = imag(overlap)
-            dynamics = T_halfstep(dynamics)
-            dynamics.istep += 1
 
+            dynamics = T_halfstep(dynamics) # Initialize new step
+            dynamics.istep += 1
         end
     end
-    dynamics = V_halfstep(dynamics)
+    dynamics = V_halfstep(dynamics) # Complete integration
     return outdata
 end
 
@@ -418,10 +436,14 @@ metadata = MetaData(inputfile=infile)
 if metadata.input["dimensions"] == 1
     # Read-in data and settings:
     # Prepare ψ(t=0):
-    wf0 = create_harm_state(0, metadata.x_dim, 
-                            metadata.input["initWF"]["initpos"], 
-                            metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"], 
-                            metadata.input["mass"]*constants["μ_to_me"])   
+    if haskey(metadata.input["initWF"], "fromfile")
+        wf0 = read_wf(metadata.input["initWF"]["fromfile"])
+    else
+        wf0 = create_harm_state(0, metadata.x_dim, 
+                                metadata.input["initWF"]["initpos"], 
+                                metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"], 
+                                metadata.input["mass"]*constants["μ_to_me"])   
+    end
     # Prepare dynamics:
     k_space = construct_kspace(x_dim=metadata.x_dim, 
                                μx=metadata.input["mass"]*constants["μ_to_me"])
@@ -438,13 +460,17 @@ if metadata.input["dimensions"] == 1
     outdata.wf["Xdim"][:] = metadata.x_dim
 elseif metadata.input["dimensions"] == 2
     # Prepare ψ(t=0):
-    wf0 = create_harm_state_2D(n=0, xdim=metadata.x_dim, ydim=metadata.y_dim,
+    if haskey(metadata.input["initWF"], "fromfile")
+        wf0 = read_wf(metadata.input["initWF"]["fromfile"])
+    else
+        wf0 = create_harm_state_2D(n=0, xdim=metadata.x_dim, ydim=metadata.y_dim,
                                x0=metadata.input["initWF"]["initpos"][1],
                                y0=metadata.input["initWF"]["initpos"][2],
                                ωx=metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"],
                                μx=metadata.input["mass"][1]*constants["μ_to_me"],
                                ωy=metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"],
                                μy=metadata.input["mass"][2]*constants["μ_to_me"])
+    end
     # Prepare dynamics:
     k_space = construct_kspace(x_dim=metadata.x_dim, 
                                μx=metadata.input["mass"][1]*constants["μ_to_me"],
@@ -497,7 +523,11 @@ println("\n")
 compute_spectrum(outdata)
 save_CF(outdata)
 
-# Close NetCDF file:
+# Save gnuplot scripts
+GP_spectrum()
+GP_correlation_function()
+
+# Close NetCDF file with PAmp:
 close(outdata.wf)
 
 print_output()
