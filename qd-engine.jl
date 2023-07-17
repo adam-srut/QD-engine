@@ -34,6 +34,8 @@ BLAS.set_num_threads(1)
         - Support for irregular grids
     - Special stride for PAmp [x]
     - Read in relaxed ψ(t=0) from NetCDF file [x]
+    - Stand alone computation of spectra (various lineshape widths)
+       - Frequency shift in Fourier Transform
 =#
 
 #=================================================
@@ -125,7 +127,10 @@ function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt:
         defDim(wfout, "x", length(wf0))
         defDim(wfout, "time", N_records_WF) 
         defVar(wfout, "PAmp", Float32, ("x", "time"), deflatelevel=0)
-       defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
+        defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
+        defDim(wfout, "timeCF", N_records)
+        defVar(wfout, "CFRe", Float64, ("timeCF", ))
+        defVar(wfout, "CFIm", Float64, ("timeCF", ))
     elseif ndims(wf0) == 2
         (nx,ny) = size(wf0)
         wfout = NCDataset("WF.nc", "c")
@@ -136,6 +141,9 @@ function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt:
         defVar(wfout, "PAmp", Float32, ("x", "y", "time"), deflatelevel=0)
         defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
         defVar(wfout, "Ydim", Float64, ("y",), deflatelevel=0)
+        defDim(wfout, "timeCF", N_records)
+        defVar(wfout, "CFRe", Float64, ("timeCF", ))
+        defVar(wfout, "CFIm", Float64, ("timeCF", ))
     else
         error("Wrong dimensions of the inital WF.")
     end
@@ -151,28 +159,28 @@ struct MetaData
     input::Dict
     potential::Array{Float64}
     ref_potential::Array{Float64}
-    x_dim::Array{Float64}
-    y_dim::Array{Float64}
+    xdim::Array{Float64}
+    ydim::Array{Float64}
 end
 
 function MetaData(;
         inputfile::String="input.yml")
     input = YAML.load_file(inputfile)
     if input["dimensions"] == 1
-        (x_dim, potential) = read_potential(input["potential"])
+        (xdim, potential) = read_potential(input["potential"])
         if haskey(input, "imagT")
             (_, ref_potential) = read_potential(input["imagT"]["gs_potential"])
-            return MetaData(input, potential, ref_potential, x_dim, Array{Float64}(undef, length(x_dim)))
+            return MetaData(input, potential, ref_potential, xdim, Array{Float64}(undef, length(xdim)))
         else
-            return MetaData(input, potential, Array{Float64}(undef, length(potential)), x_dim, Array{Float64}(undef, length(x_dim)))
+            return MetaData(input, potential, Array{Float64}(undef, length(potential)), xdim, Array{Float64}(undef, length(xdim)))
         end
     elseif input["dimensions"] == 2
-        (potential, x_dim, y_dim) = read_potential(input["potential"])
+        (potential, xdim, ydim) = read_potential(input["potential"])
         if haskey(input, "imagT")
             (ref_potential, _, _) = read_potential(input["imagT"]["gs_potential"])
-            return MetaData(input, potential, ref_potential, x_dim, y_dim)
+            return MetaData(input, potential, ref_potential, xdim, ydim)
         else
-            return MetaData(input, potential, Array{Float64}(undef, length(potential)), x_dim, y_dim)
+            return MetaData(input, potential, Array{Float64}(undef, length(potential)), xdim, ydim)
         end
     else
         throw(ArgumentError("Dynamics in $(input["dimensions"]) dimensions is not supported."))
@@ -219,64 +227,67 @@ function read_wf(filepath::String)
     end
 end
 
-function construct_kspace(;x_dim, μx, y_dim=false, μy=false)
+function construct_kspace(;xdim, μx, ydim=false, μy=false)
     #= Construct inverse space for applying the kinetic energy operator =#
-    N_x = length(x_dim)
-    L_x = x_dim[end] - x_dim[1]
-    if !(y_dim isa Bool)
-        N_y = length(y_dim)
-        L_y = y_dim[end] - y_dim[1]
-        k_space = OffsetArray(Array{Float64}(undef, N_x, N_y), -div(N_x,2)-1, -div(N_y,2)-1)
-        for x in -div(N_x,2):div(N_x,2)-1
-            for y in -div(N_y,2):div(N_y,2)-1
-                k_space[ x, y ] = (1/2/μx)*(2*pi/L_x*x)^2 + (1/2/μy)*(2*pi/L_y*y)^2
+    Nx = length(xdim)
+    Lx = xdim[end] - xdim[1]
+    if !(ydim isa Bool)
+        Ny = length(ydim)
+        Ly = ydim[end] - ydim[1]
+        k_space = OffsetArray(Array{Float64}(undef, Nx, Ny), -div(Nx,2)-1, -div(Ny,2)-1)
+        for x in -div(Nx,2):div(Nx,2)-1
+            for y in -div(Ny,2):div(Ny,2)-1
+                k_space[ x, y ] = (1/2/μx)*(2*pi/Lx*x)^2 + (1/2/μy)*(2*pi/Ly*y)^2
             end
         end
     else
-        k_space = OffsetArray(Array{Float64}(undef, N_x), -div(N_x,2)-1)
-        for x in -div(N_x,2):div(N_x,2)-1
-            k_space[ x ] = (1/2/μx) * (2*pi/L_x*x)^2
+        k_space = OffsetArray(Array{Float64}(undef, Nx), -div(Nx,2)-1)
+        for x in -div(Nx,2):div(Nx,2)-1
+            k_space[ x ] = (1/2/μx) * (2*pi/Lx*x)^2
         end
     end
     return OffsetArrays.no_offset_view(k_space)
 end
 
-function propagate(dynamics::Dynamics)
+function propagate!(dynamics::Dynamics)
     #= Propagation with the split operator method
         Returns constructor `dynamics` with modified ψ.
         This is not the "correct" propagator!
         Dynamics has to be initialized with: exp(-i*Δt/2*T̂)ψ(t)
                              and ended with: exp(-i*Δt/2*V̂)ψ(t)  =#
     wf = dynamics.wf
-    wf = wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
-    wf = dynamics.PFFT * wf
-    wf = fftshift(wf)
-    wf = wf .* exp.( -(im*dynamics.dt) * dynamics.k_space )
-    wf = fftshift(wf)
-    wf = dynamics.PIFFT * wf
-    dynamics.wf = wf
+    wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
+    wf .= dynamics.PFFT * wf
+    wf .= fftshift(wf)
+    wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.k_space )
+    wf .= fftshift(wf)
+    wf .= dynamics.PIFFT * wf
+    dynamics.wf .= wf
+    wf = nothing
     return dynamics
 end
 
-function T_halfstep(dynamics::Dynamics)
+function T_halfstep!(dynamics::Dynamics)
     #= Initialize dynamics with a half-step propagation 
        of a free particle: exp(-i*Δt/2*T̂)ψ(t) =#
     wf = dynamics.wf
-    wf = dynamics.PFFT * wf
-    wf = fftshift(wf)
-    wf = wf .* exp.( -(im*dynamics.dt/2) * dynamics.k_space )
-    wf = fftshift(wf)
-    wf = dynamics.PIFFT * wf
-    dynamics.wf = wf
+    wf .= dynamics.PFFT * wf
+    wf .= fftshift(wf)
+    wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.k_space )
+    wf .= fftshift(wf)
+    wf .= dynamics.PIFFT * wf
+    dynamics.wf .= wf
+    wf = nothing
     return dynamics
 end
 
-function V_halfstep(dynamics::Dynamics)
+function V_halfstep!(dynamics::Dynamics)
     #= End dynamics with a half-step phase change: 
         exp(-i*Δt/2*V̂)ψ(t) =#
     wf = dynamics.wf
-    wf = wf .* exp.( -(im*dynamics.dt/2) * dynamics.potential )
-    dynamics.wf = wf
+    wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.potential )
+    dynamics.wf .= wf
+    wf = nothing
     return dynamics
 end
 
@@ -319,27 +330,28 @@ function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
     print("\t  Progress:\n\t   ")
     
     dynamics.dt = -dynamics.dt*im
-    dynamics = T_halfstep(dynamics)
+    T_halfstep!(dynamics)
 
     while dynamics.istep < Nsteps
         
-        dynamics = propagate(dynamics)
+        propagate!(dynamics)
         WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
-        dynamics.wf = dynamics.wf / WFnorm
+        dynamics.wf .= dynamics.wf / WFnorm
         dynamics.istep += 1
 
         # Update progress bar
         if dynamics.istep in round.(Int, range(start=1, stop=Nsteps, length=10))
             print( @sprintf "%2d%%" 100*dynamics.istep/Nsteps)
+            flush(stdout)
         end
     end
     print("\n")
 
-    dynamics = V_halfstep(dynamics)
+    V_halfstep!(dynamics)
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
     
-    (energy, _, _) = compute_energy(dynamics, metadata)
+    (energy, Epot, Ekin) = compute_energy(dynamics, metadata)
     println(@sprintf "\n\t  Energy of the WP:%10.2f cm^-1." energy)
 
     # Save initial condition:
@@ -349,22 +361,43 @@ function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
         outfile.attrib["energy"] = "energy of the relaxed WF is: $energy cm⁻¹."
         if metadata.input["dimensions"] == 1
             defDim(outfile, "x", length(dynamics.wf))
+            defDim(outfile, "scalars", 1)
             defVar(outfile, "wfRe", Float64, ("x",))
             defVar(outfile, "wfIm", Float64, ("x",))
+            defVar(outfile, "xdim", Float64, ("x",))
+            defVar(outfile, "ZPE", Float64, ("scalars",))
+            defVar(outfile, "ZPE_T", Float64, ("scalars",))
+            defVar(outfile, "ZPE_V", Float64, ("scalars",))
+            outfile["ZPE"][1] = energy
+            outfile["ZPE_T"][1] = Ekin
+            outfile["ZPE_V"][1] = Epot
             outfile["wfRe"][:] = real.(dynamics.wf)
             outfile["wfIm"][:] = imag.(dynamics.wf)
+            outfile["xdim"][:] = metadata.xdim
         elseif metadata.input["dimensions"] == 2
             outfile.attrib["title"] = "File contains inital WF from imaginary time propagation."
             (nx, ny) = size(dynamics.wf)
             defDim(outfile, "x", nx)
             defDim(outfile, "y", ny)
+            defDim(outfile, "scalars", 1)
+            defVar(outfile, "xdim", Float64, ("x",))
+            defVar(outfile, "ydim", Float64, ("y",))
             defVar(outfile, "wfRe", Float64, ("x", "y"))
             defVar(outfile, "wfIm", Float64, ("x", "y"))
+            defVar(outfile, "ZPE", Float64, ("scalars",))
+            defVar(outfile, "ZPE_T", Float64, ("scalars",))
+            defVar(outfile, "ZPE_V", Float64, ("scalars",))
+            outfile["ZPE"][1] = energy
+            outfile["ZPE_T"][1] = Ekin
+            outfile["ZPE_V"][1] = Epot
             outfile["wfRe"][:,:] = real.(dynamics.wf)
             outfile["wfIm"][:,:] = imag.(dynamics.wf)
+            outfile["xdim"][:] = metadata.xdim
+            outfile["ydim"][:] = metadata.ydim
         end
     end
     println("\t  Relaxed wavefunction saved to: `initWF.nc`")
+    flush(stdout)
     return dynamics
 end
 
@@ -375,45 +408,51 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
 
     # Set up progress bar
     print("\t  Progress:\n\t    0%")
-    
+    flush(stdout) 
+
     # t=0
-    wf0 = dynamics.wf
-    dynamics = T_halfstep(dynamics) # Initialize
+    wf0 = copy(dynamics.wf)
+    T_halfstep!(dynamics) # Initialize
     dynamics.istep += 1 # t0 + Δt/2
     
     # Propagation:
     while dynamics.istep < dynamics.Nsteps
 
         # Propagate
-        dynamics = propagate(dynamics)
+        propagate!(dynamics)
         dynamics.istep += 1 # t + 3/2*Δt
  
         # Update progress bar
         if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
             print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
+            flush(stdout)
         end
        
         # Compute CF and save PAmp:
         if mod(dynamics.istep, dynamics.step_stride) == 0
-            dynamics = V_halfstep(dynamics) # Complete integration
+            V_halfstep!(dynamics) # Complete integration
             irec = div(dynamics.istep, dynamics.step_stride)
-            outdata.CF[irec] = dot(wf0, dynamics.wf)
+            overlap = dot(wf0, dynamics.wf)
+            outdata.CF[irec] = overlap
+            outdata.wf["CFRe"][irec] = real(overlap)
+            outdata.wf["CFIm"][irec] = imag(overlap)
            
             # Save probability amplitude with 10*stride
             if mod(dynamics.istep, 10*dynamics.step_stride) == 0
                 irec = div(dynamics.istep, 10*dynamics.step_stride)
                 if metadata.input["dimensions"] == 1
-                    outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 elseif metadata.input["dimensions"] == 2
-                    outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, :, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 end
+                #GC.gc() # call garbage collector
             end
 
-            dynamics = T_halfstep(dynamics) # Initialize new step
+            T_halfstep!(dynamics) # Initialize new step
             dynamics.istep += 1
         end
     end
-    dynamics = V_halfstep(dynamics) # Complete integration
+    V_halfstep!(dynamics) # Complete integration
     return outdata
 end
 
@@ -423,6 +462,7 @@ end
 
 starttime = now()
 println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+flush(stdout)
 
 # Include helper functions:
 include("analysis.jl")
@@ -439,13 +479,13 @@ if metadata.input["dimensions"] == 1
     if haskey(metadata.input["initWF"], "fromfile")
         wf0 = read_wf(metadata.input["initWF"]["fromfile"])
     else
-        wf0 = create_harm_state(0, metadata.x_dim, 
+        wf0 = create_harm_state(0, metadata.xdim, 
                                 metadata.input["initWF"]["initpos"], 
                                 metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"], 
                                 metadata.input["mass"]*constants["μ_to_me"])   
     end
     # Prepare dynamics:
-    k_space = construct_kspace(x_dim=metadata.x_dim, 
+    k_space = construct_kspace(xdim=metadata.xdim, 
                                μx=metadata.input["mass"]*constants["μ_to_me"])
     dynamics = Dynamics(potential=metadata.potential, 
                         k_space=k_space, 
@@ -457,13 +497,13 @@ if metadata.input["dimensions"] == 1
                            metadata.input["params"]["Nsteps"], 
                            wf0, 
                            metadata.input["params"]["dt"])
-    outdata.wf["Xdim"][:] = metadata.x_dim
+    outdata.wf["Xdim"][:] = metadata.xdim
 elseif metadata.input["dimensions"] == 2
     # Prepare ψ(t=0):
     if haskey(metadata.input["initWF"], "fromfile")
         wf0 = read_wf(metadata.input["initWF"]["fromfile"])
     else
-        wf0 = create_harm_state_2D(n=0, xdim=metadata.x_dim, ydim=metadata.y_dim,
+        wf0 = create_harm_state_2D(n=0, xdim=metadata.xdim, ydim=metadata.ydim,
                                x0=metadata.input["initWF"]["initpos"][1],
                                y0=metadata.input["initWF"]["initpos"][2],
                                ωx=metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"],
@@ -472,9 +512,9 @@ elseif metadata.input["dimensions"] == 2
                                μy=metadata.input["mass"][2]*constants["μ_to_me"])
     end
     # Prepare dynamics:
-    k_space = construct_kspace(x_dim=metadata.x_dim, 
+    k_space = construct_kspace(xdim=metadata.xdim, 
                                μx=metadata.input["mass"][1]*constants["μ_to_me"],
-                               y_dim=metadata.y_dim,
+                               ydim=metadata.ydim,
                                μy=metadata.input["mass"][2]*constants["μ_to_me"])
     dynamics = Dynamics(potential=metadata.potential,
                         k_space=k_space,
@@ -486,8 +526,8 @@ elseif metadata.input["dimensions"] == 2
                            metadata.input["params"]["Nsteps"],
                            wf0,
                            metadata.input["params"]["dt"])
-    outdata.wf["Xdim"][:] = metadata.x_dim
-    outdata.wf["Ydim"][:] = metadata.y_dim
+    outdata.wf["Xdim"][:] = metadata.xdim
+    outdata.wf["Ydim"][:] = metadata.ydim
 end
 
 # Echo init

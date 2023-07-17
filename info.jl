@@ -14,6 +14,7 @@ function print_hello()
 
    """
    println(hello)
+   flush(stdout)
 end
 
 function print_init(metadata::MetaData)
@@ -36,15 +37,15 @@ function print_init(metadata::MetaData)
             fwhm = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"]*constants["μ_to_me"])
             println(@sprintf "\t\t%-20s%12.3f Bohrs\n" "FWHM:" fwhm )
         end
-        println(@sprintf "\t%-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
-        println(@sprintf "\t%-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )
-        println(@sprintf "\t%-20s%12.f fs" "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"]/constants["fs_to_au"] )
-        println(@sprintf "\t%-20s%12d steps" "stride:"  metadata.input["params"]["stride"]  )
-        println("\t  Information about potential:")
-        println(@sprintf "\t%-20s%12.2e Bohrs" "Grid spacing:" metadata.x_dim[2]-metadata.x_dim[1] )
-        println(@sprintf "\t%-20s%12d" "Grid points:" length(metadata.x_dim) )
-        println(@sprintf "\t%-20s%12.4f a.u." "Maximal momentum:" 1/2/metadata.x_dim[2]-metadata.x_dim[1] )
-        println(@sprintf "\n\t%-22s%12s\n" "Potential taken from:" metadata.input["potential"] )
+        println(@sprintf "\t %-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
+        println(@sprintf "\t %-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )
+        println(@sprintf "\t %-20s%12.f fs" "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"]/constants["fs_to_au"] )
+        println(@sprintf "\t %-20s%12d steps" "stride:"  metadata.input["params"]["stride"]  )
+        println("\tInformation about potential:")
+        println(@sprintf "\t %-20s%12.2e Bohrs" "Grid spacing:" metadata.xdim[2]-metadata.xdim[1] )
+        println(@sprintf "\t %-20s%12d" "Grid points:" length(metadata.xdim) )
+        println(@sprintf "\t %-20s%12.4f a.u." "Maximal momentum:" 1/2/metadata.xdim[2]-metadata.xdim[1] )
+        println(@sprintf "\n\t %-22s%12s\n" "Potential taken from:" metadata.input["potential"] )
     elseif metadata.input["dimensions"] == 2
         println("\n\t========> 2-dimensional dynamics <======== ")
         println(@sprintf "\t Particle mass 1:%8.4f amu" metadata.input["mass"][1] )
@@ -59,15 +60,15 @@ function print_init(metadata::MetaData)
             fwhm2 = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"][2]*constants["μ_to_me"])
             println(@sprintf "\t\t%-20s%12.3f,%11.3f Bohrs\n" "FWHM:" fwhm1 fwhm2 )
         end
-        println(@sprintf "\t%-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
-        println(@sprintf "\t%-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )
-        println(@sprintf "\t%-20s%12.f fs" "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"]/constants["fs_to_au"] )
-        println(@sprintf "\t%-20s%12d steps" "stride:"  metadata.input["params"]["stride"]  )
-        println("\t  Information about potential:")
-        println(@sprintf "\t%-20s%12.2e Bohrs" "X-Grid spacing:" metadata.x_dim[2]-metadata.x_dim[1] )
-        println(@sprintf "\t%-20s%12.2e Bohrs" "Y-Grid spacing:" metadata.y_dim[2]-metadata.y_dim[1] )
-        println(@sprintf "\t%-20s%12d" "Grid points:" length(metadata.potential) )
-        println(@sprintf "\t%-20s%12.4f,%11.4f a.u." "Maximal momentum:" abs(1/2/metadata.x_dim[2]-metadata.x_dim[1]) abs(1/2/metadata.y_dim[2]-metadata.y_dim[1]) )
+        println(@sprintf "\t %-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
+        println(@sprintf "\t %-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )
+        println(@sprintf "\t %-20s%12.f fs" "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"]/constants["fs_to_au"] )
+        println(@sprintf "\t %-20s%12d steps" "stride:"  metadata.input["params"]["stride"]  )
+        println("\tInformation about potential:")
+        println(@sprintf "\t %-20s%12.2e Bohrs" "X-Grid spacing:" metadata.xdim[2]-metadata.xdim[1] )
+        println(@sprintf "\t %-20s%12.2e Bohrs" "Y-Grid spacing:" metadata.ydim[2]-metadata.ydim[1] )
+        println(@sprintf "\t %-20s%12d" "Grid points:" length(metadata.potential) )
+        println(@sprintf "\t %-20s%12.4f,%11.4f a.u." "Maximal momentum:" abs(1/2/metadata.xdim[2]-metadata.xdim[1]) abs(1/2/metadata.ydim[2]-metadata.ydim[1]) )
         println(@sprintf "\n\t%-22s%12s\n" "Potential taken from:" metadata.input["potential"] )
     end
     
@@ -88,33 +89,34 @@ function print_init(metadata::MetaData)
     println("\t" * "*"^60)
     println("\tInitial condition:\n")
     if metadata.input["dimensions"] == 1
-        plt_min = Int(round(0.1*length(metadata.x_dim)))
-        plt_max = Int(round(0.9*length(metadata.x_dim)))
+        plt_min = Int(round(0.1*length(metadata.xdim)))
+        plt_max = Int(round(0.9*length(metadata.xdim)))
         pot_max = max(metadata.potential[plt_min:plt_max]...)
         pot_min = min(metadata.potential[plt_min:plt_max]...)
         wf0 = abs.(dynamics.wf) .^ 2
         wf_max = maximum(wf0)
-        initPlot = lineplot(metadata.x_dim[plt_min:plt_max], metadata.potential[plt_min:plt_max],
+        initPlot = lineplot(metadata.xdim[plt_min:plt_max], metadata.potential[plt_min:plt_max],
                            canvas=BrailleCanvas,
                            border=:ascii, color=:white, name="potential",
                            xlabel="Distance [Bohrs]", ylabel="Energy [Hartree]",
                            height=10, grid=false, compact=true, blend=false)
         wf_rescale = 0.5*(pot_max - pot_min)/wf_max
         wf_to_plot = wf0 * wf_rescale .+ 1.1*pot_min
-        lineplot!(initPlot, metadata.x_dim, wf_to_plot, color=:cyan, name="WF(t=0)")
+        lineplot!(initPlot, metadata.xdim, wf_to_plot, color=:cyan, name="WF(t=0)")
         println(initPlot)
         println("\t" * "*"^60 * "\n\n")
     elseif metadata.input["dimensions"] == 2
-        initPlot = contourplot(metadata.x_dim, metadata.y_dim, metadata.potential,
+        initPlot = contourplot(metadata.xdim, metadata.ydim, metadata.potential,
                                canvas=BrailleCanvas,
                                border=:ascii, colorbar=false,
                                xlabel="X [Bohrs]", ylabel="Y [Bohrs]",
                                height=10, width=20,
                                grid=false, compact=true, blend=false)
-        contourplot!(initPlot, metadata.x_dim, metadata.y_dim, Float64.( conj.(dynamics.wf) .* dynamics.wf),
+        contourplot!(initPlot, metadata.xdim, metadata.ydim, Float64.( conj.(dynamics.wf) .* dynamics.wf),
                     colormap=:Greys_3)
         println(initPlot)
         println("\t" * "*"^60 * "\n\n")
+        flush(stdout)
     end
 end
 
@@ -128,6 +130,7 @@ function print_run()
 
 """
     println(message)
+    flush(stdout)
 end
 
 function print_output()
@@ -146,5 +149,6 @@ function print_output()
 """
 
     println(message)
+    flush(stdout)
 end
 

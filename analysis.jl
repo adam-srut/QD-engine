@@ -2,16 +2,16 @@
 
 function compute_spectrum(outdata::OutData;
         maxWn::Number=10000, zpe::Number=0, name::String="spectrum",
-        zff::Int=10, lineshapeWidth::Number=250)
+        zff::Int=20, lineshapeWidth::Number=250)
     #= Compute spectrum from auto-correlation function. =#
     # Without the window function:
     cf = outdata.CF
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*zff) ]
-    spectrum = abs.(ifft(cf)) .^ 2
+    spectrum = abs.(ifft(cf)) 
     timestep = outdata.dt*(outdata.step_stride)/constants["fs_to_au"]
     dv = 1/(length(cf)*timestep*1e-15)
-    wns = [ zpe + i*dv/constants["c"] for i in 1:length(cf) ]
+    wns = [ zpe + i*dv/constants["c"] for i in 0:length(cf)-1 ]
     spectrum = wns .* spectrum
     spectrum = spectrum/norm(spectrum)
     nyquist = 1/(timestep*1e-15)/2/constants["c"]
@@ -23,7 +23,7 @@ function compute_spectrum(outdata::OutData;
     window = [ hanning(t, length(cf)) for t in 0:length(cf)-1 ]
     cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
-    spectrum_hann = abs.(ifft(cf)) .^ 2
+    spectrum_hann = abs.(ifft(cf)) 
     spectrum_hann = wns .* spectrum_hann
     spectrum_hann = spectrum_hann/norm(spectrum_hann)
 
@@ -31,23 +31,23 @@ function compute_spectrum(outdata::OutData;
     cf = outdata.CF
     cf = cf .- mean(cf)
     fwhm = lineshapeWidth/timestep
-    gauss(t, fwhm) = exp( -t^2/(0.6*fwhm)^2 )
+    gauss(t::Number, fwhm::Number) = exp( -t^2/(0.6*fwhm)^2 )
     window = [ gauss(t, fwhm) for t in 0:length(cf)-1 ]
     cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
-    spectrum_Gauss = abs.(ifft(cf)) .^ 2
+    spectrum_Gauss = abs.(ifft(cf)) 
     spectrum_Gauss = wns .* spectrum_Gauss
     spectrum_Gauss = spectrum_Gauss/norm(spectrum_Gauss)
 
     # Add lineshape function (Kubo):
     cf = outdata.CF
     cf = cf .- mean(cf)
-    kubo(t, Δ, γ) = exp( -( Δ^2/γ^2 * (γ*t - 1 + exp(-γ*t) ) ) )
+    kubo(t::Number, Δ::Number, γ::Number) = exp( -( Δ^2/γ^2 * (γ*t - 1 + exp(-γ*t) ) ) )
     γ = Δ = (lineshapeWidth/timestep)^(-1)
     window = [ kubo(t, Δ, γ) for t in 0:length(cf)-1 ]
     cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
-    spectrum_Kubo = abs.(ifft(cf)) .^ 2
+    spectrum_Kubo = abs.(ifft(cf)) 
     spectrum_Kubo = wns .* spectrum_Kubo
     spectrum_Kubo = spectrum_Kubo/norm(spectrum_Kubo)
 
@@ -64,6 +64,7 @@ function compute_spectrum(outdata::OutData;
     end
 end
 
+
 function compute_energy(dynamics::Dynamics, metadata::MetaData)
     #= Evaluate < ψ | H | ψ > using the Direct Fourier method.
         Energy is returned in Hatrees and composed into kinetic
@@ -75,13 +76,13 @@ function compute_energy(dynamics::Dynamics, metadata::MetaData)
     Tket = fftshift(Tket)
     Tket = dynamics.PIFFT * Tket
     if metadata.input["dimensions"] == 1
-        wf_norm = abs(trapz(metadata.x_dim, conj(dynamics.wf) .* dynamics.wf))
-        Venergy = abs(trapz(metadata.x_dim, conj(dynamics.wf) .* Vket))/wf_norm
-        Tenergy = abs(trapz(metadata.x_dim, conj(dynamics.wf) .* Tket))/wf_norm
+        wf_norm = abs(trapz(metadata.xdim, conj(dynamics.wf) .* dynamics.wf))
+        Venergy = abs(trapz(metadata.xdim, conj(dynamics.wf) .* Vket))/wf_norm
+        Tenergy = abs(trapz(metadata.xdim, conj(dynamics.wf) .* Tket))/wf_norm
     elseif metadata.input["dimensions"] == 2
-        wf_norm = abs(trapz((metadata.x_dim, metadata.y_dim), conj.(dynamics.wf) .* dynamics.wf))
-        Venergy = abs(trapz((metadata.x_dim, metadata.y_dim), conj.(dynamics.wf) .* Vket))/wf_norm
-        Tenergy = abs(trapz((metadata.x_dim, metadata.y_dim), conj.(dynamics.wf) .* Tket))/wf_norm
+        wf_norm = abs(trapz((metadata.xdim, metadata.ydim), conj.(dynamics.wf) .* dynamics.wf))
+        Venergy = abs(trapz((metadata.xdim, metadata.ydim), conj.(dynamics.wf) .* Vket))/wf_norm
+        Tenergy = abs(trapz((metadata.xdim, metadata.ydim), conj.(dynamics.wf) .* Tket))/wf_norm
     end
     return (Venergy + Tenergy, Venergy, Tenergy).*constants["Eh_to_wn"]
 end

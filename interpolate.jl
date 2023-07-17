@@ -6,6 +6,7 @@ using YAML
 using ArgParse
 using Printf
 using Dates
+using Plots
 
 #=================================================
             Parse arguments
@@ -48,7 +49,7 @@ function read_potential(filepath::String)
     end
 end
 
-function read_potential2D(filepath::String; state::Int=3)
+function read_potential2D(filepath::String)
     #= Read 2D potential in format:
      x_pos | y_pos | ... | state index | ... =#
     pot = []
@@ -58,7 +59,7 @@ function read_potential2D(filepath::String; state::Int=3)
                 continue
             end
             line = split(line)
-            vals = map( x -> parse(Float64, line[x]), [1,2, state])
+            vals = parse.(Float64, line)
             append!(pot, [vals])
         end
     end
@@ -100,6 +101,11 @@ function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoint
         defVar(potfile, "xdim", collect(xrange), ("x", ))
         defVar(potfile, "potential", itp_pot, ("x", ))
     end
+    plot(collect(xrange), itp_pot,
+         xlabel="X [Bohr]",
+         ylabel="Energy [Hartree]",
+         title="Interpolated potential")
+    savefig(outname * ".png")
 end
 
 function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::Array{Float64}, 
@@ -117,6 +123,11 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
     # Interpolate and create a new grid:
     itp = cubic_spline_interpolation((xrange_old, yrange_old), potential)
     itp_pot = vcat([ [ itp(x, y) for x in xrange] for y in yrange ]'...)
+    # Check for succesfull interpolation:
+    if any(isnan.(itp_pot))
+        println("\t" * "*"^20 * "WARNING" * "*"^20)
+        println("\t  !!!Interpolation failed!!!\n\t  Check for missing values or discontinuities in $(input["potfit"]["potfile"]).\n")
+    end
     # Save resutls:
     endswith(name, ".nc") ? outname = name : outname = name * ".nc"
     NCDataset(outname, "c") do potfile
@@ -127,12 +138,22 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
         defVar(potfile, "ydim", collect(yrange), ("y", ))
         defVar(potfile, "potential", itp_pot, ("x", "y"))
     end
+    # Plot results:
+    contour(collect(xrange), collect(yrange), itp_pot,
+            xlabel="X [Bohr]",
+            ylabel="Y [Bohr]",
+            title="Interpolated potential",
+            color=:lighttemperaturemap,
+            fill=true)
+    savefig(outname * ".png")
 end
 
 
 #===================================================
                     Main section
 ===================================================#
+
+println("\n  Started " * Dates.format(now(), "on dd/mm/yyyy at HH:MM:SS") * "\n")
 
 hello = """
 
@@ -172,8 +193,8 @@ elseif input["dimensions"] == 2
     println("""
 \t  2D dimensional potential
 \t  Potential taken from: $(input["potfit"]["potfile"])
-\t  Xrange: [$(xdim[1]), $(xdim[end])]
-\t  yrange: [$(ydim[1]), $(ydim[end])]
+\t  X-range: [$(xdim[1]), $(xdim[end])]
+\t  Y-range: [$(ydim[1]), $(ydim[end])]
 \t  Number of points before interpolation: $(length(potential))
 \t  Number of points after interpolation: $(input["potfit"]["NPoints"][1]*input["potfit"]["NPoints"][2])
 """)
