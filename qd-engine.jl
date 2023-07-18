@@ -212,16 +212,14 @@ end
 function read_wf(filepath::String)
     #= Read relaxed wavefunction from NetCDF file =#
     NCDataset(filepath, "r") do wffile
-        if length(wffile.dim) == 1
+        if !haskey(wffile.dim, "y") 
             wfReal = wffile["wfRe"][:]
             wfImag = wffile["wfIm"][:]
             wf = wfReal .+ 1im*wfImag
-        elseif length(wffile.dim) == 2
+        else
             wfReal = wffile["wfRe"][:,:]
             wfImag = wffile["wfIm"][:,:]
             wf = wfReal .+ 1im*wfImag
-        else
-            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(wffile.dim))."))
         end
         return wf
     end
@@ -441,9 +439,9 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             if mod(dynamics.istep, 10*dynamics.step_stride) == 0
                 irec = div(dynamics.istep, 10*dynamics.step_stride)
                 if metadata.input["dimensions"] == 1
-                    outdata.wf["PAmp"][:, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 elseif metadata.input["dimensions"] == 2
-                    outdata.wf["PAmp"][:, :, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 end
                 #GC.gc() # call garbage collector
             end
