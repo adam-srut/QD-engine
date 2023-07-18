@@ -33,7 +33,7 @@ Plot2D[potfile_, wffile_] :=
       potfile["/potential"][[x, y]]*27.11}, 
     {x, 1, Length[potfile["/xdim"]], 10}, {y, 1, Length[potfile["/ydim"]], 10}], 1];
   barleg = 
-   BarLegend[{ColorData["TemperatureMap", "ColorFunction"][#/Max[potential[[;; , 3]]]-Min[potential[[;; , 3]]]]&, 
+   BarLegend[{ColorData["TemperatureMap", "ColorFunction"][(#-Min[potential[[;; , 3]]])/(Max[potential[[;; , 3]]]-Min[potential[[;; , 3]]])]&, 
     {Min[potential[[;; , 3]]], Max[potential[[;; , 3]]]}},
     Frame -> True,
     LabelStyle -> Directive[Black, 12, FontFamily -> "Helvetica"],

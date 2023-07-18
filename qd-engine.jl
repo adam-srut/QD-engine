@@ -34,8 +34,9 @@ BLAS.set_num_threads(1)
         - Support for irregular grids
     - Special stride for PAmp [x]
     - Read in relaxed ψ(t=0) from NetCDF file [x]
-    - Stand alone computation of spectra (various lineshape widths)
-       - Frequency shift in Fourier Transform
+    - Stand alone computation of spectra (various lineshape widths) [x]
+        - Frequency shift in Fourier Transform [x]
+    - Imaginary time propagation till a overlap threshold is reached 
 =#
 
 #=================================================
