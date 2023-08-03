@@ -10,7 +10,7 @@ using SpecialPolynomials
 using UnicodePlots
 using Trapz
 
-# Using more cores for FFTW or BLAS do not enhance performance
+# Using more cores for FFTW or BLAS do not enhance performance!
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(1)
 
@@ -36,7 +36,7 @@ BLAS.set_num_threads(1)
     - Read in relaxed ψ(t=0) from NetCDF file [x]
     - Stand alone computation of spectra (various lineshape widths) [x]
         - Frequency shift in Fourier Transform [x]
-    - Imaginary time propagation till a overlap threshold is reached 
+    - Imaginary time propagation till an overlap threshold is reached 
 =#
 
 #=================================================
@@ -253,7 +253,7 @@ function propagate!(dynamics::Dynamics)
         Returns constructor `dynamics` with modified ψ.
         This is not the "correct" propagator!
         Dynamics has to be initialized with: exp(-i*Δt/2*T̂)ψ(t)
-                             and ended with: exp(-i*Δt/2*V̂)ψ(t)  =#
+                             and ended with: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)  =#
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
     wf .= dynamics.PFFT * wf
@@ -280,9 +280,23 @@ function T_halfstep!(dynamics::Dynamics)
     return dynamics
 end
 
+function end_step!(dynamics::Dynamics)
+    #= Complete integration till the next integer step:
+        exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t) =#
+    wf = dynamics.wf
+    wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
+    wf .= dynamics.PFFT * wf
+    wf .= fftshift(wf)
+    wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.k_space )
+    wf .= fftshift(wf)
+    wf .= dynamics.PIFFT * wf
+    dynamics.wf .= wf
+    wf = nothing
+    return dynamics
+end
+
 function V_halfstep!(dynamics::Dynamics)
-    #= End dynamics with a half-step phase change: 
-        exp(-i*Δt/2*V̂)ψ(t) =#
+    #= Half-step phase change: exp(-i*Δt/2*V̂)ψ(t) =#
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.potential )
     dynamics.wf .= wf
@@ -346,14 +360,16 @@ function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
     end
     print("\n")
 
-    V_halfstep!(dynamics)
+    end_step!(dynamics)
+    WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
+    dynamics.wf .= dynamics.wf / WFnorm
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
     
     (energy, Epot, Ekin) = compute_energy(dynamics, metadata)
     println(@sprintf "\n\t  Energy of the WP:%10.2f cm^-1." energy)
 
-    # Save initial condition:
+    # Save the initial condition:
     isfile("initWF.nc") && rm("initWF.nc")
     NCDataset("initWF.nc", "c") do outfile
         outfile.attrib["title"] = "File contains inital WF from imaginary time propagation."
@@ -419,7 +435,7 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
 
         # Propagate
         propagate!(dynamics)
-        dynamics.istep += 1 # t + 3/2*Δt
+        dynamics.istep += 1 # exp(-i*Δt*V̂)*exp(-i*Δt*T̂)ψ(t)
  
         # Update progress bar
         if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
@@ -429,7 +445,7 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
        
         # Compute CF and save PAmp:
         if mod(dynamics.istep, dynamics.step_stride) == 0
-            V_halfstep!(dynamics) # Complete integration
+            end_step!(dynamics) # Complete integration
             irec = div(dynamics.istep, dynamics.step_stride)
             overlap = dot(wf0, dynamics.wf)
             outdata.CF[irec] = overlap
@@ -440,9 +456,9 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             if mod(dynamics.istep, 10*dynamics.step_stride) == 0
                 irec = div(dynamics.istep, 10*dynamics.step_stride)
                 if metadata.input["dimensions"] == 1
-                    outdata.wf["PAmp"][:, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 elseif metadata.input["dimensions"] == 2
-                    outdata.wf["PAmp"][:, :, irec] = Float32.(conj.(dynamics.wf) .* dynamics.wf)
+                    outdata.wf["PAmp"][:, :, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
                 end
                 #GC.gc() # call garbage collector
             end

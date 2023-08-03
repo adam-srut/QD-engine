@@ -44,7 +44,7 @@ function print_init(metadata::MetaData)
         println("\tInformation about potential:")
         println(@sprintf "\t %-20s%12.2e Bohrs" "Grid spacing:" metadata.xdim[2]-metadata.xdim[1] )
         println(@sprintf "\t %-20s%12d" "Grid points:" length(metadata.xdim) )
-        println(@sprintf "\t %-20s%12.4f a.u." "Maximal momentum:" 1/2/metadata.xdim[2]-metadata.xdim[1] )
+        println(@sprintf "\t %-20s%12.4f a.u." "Maximal momentum:" abs(1/2/metadata.xdim[2]-metadata.xdim[1]) )
         println(@sprintf "\n\t %-22s%12s\n" "Potential taken from:" metadata.input["potential"] )
     elseif metadata.input["dimensions"] == 2
         println("\n\t========> 2-dimensional dynamics <======== ")
