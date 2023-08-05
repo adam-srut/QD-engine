@@ -46,7 +46,7 @@ it is then only possible to propagate the wavefunction by $N+1$ steps with:
 \psi(x,y,t+\Delta t(N+1)) = \hat{\mathcal{P}}_\mathrm{init} \left( \hat{\mathcal{P}}_\mathrm{step} \right)_N \hat{\mathcal{P}}_\mathrm{end}~\psi(x,y,t)
 \end{equation}
 ```
-Such implementation allows to ommit performing Fourier transform two times per step and thus enhance performance. 
+Such implementation allows to omit performing Fourier transform two times per step and thus enhance performance. 
 Note that in order to compute the correlation function it is necessary to end the propagation to the next integer time step.
 
-**More descriptive documentation of the package use is coming soon.**
+**More descriptive documentation of the package usage is coming soon.**
