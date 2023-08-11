@@ -5,6 +5,7 @@ using FFTW
 using Printf
 using YAML
 using ArgParse
+using Dates
 
 #=================================================
             Parse arguments
@@ -116,6 +117,25 @@ end
                 Main section
 ===================================================#
 
+starttime = now()
+println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+
+hello = """
+
+\t#====================================================
+\t            Quantum Dynamics Engine
+\t====================================================#
+\t
+\t               Don't Panic!
+
+   """
+   println(hello)
+
+println("\t============> Spectra generation <============\n")
+println("\t  Spectrum as a Fourier transform of an autocorrelation function:")
+println("\t    σ(ν) = ν/2/π ∫ <ψ(0)|ψ(t)> ⋅ LS(t) exp(i2πνt) dt")
+println("\t    where LS(t) is a lineshape function.")
+
 input = YAML.load_file(infile)
 
 if haskey(input["spectrum"], "outname")
@@ -126,12 +146,15 @@ end
 
 if input["spectrum"]["ZPE"] == "read"
     zpe = read_ZPE()
+    println("\t  Zero-point energy will be read from file `initWF.nc`.")
+    println(@sprintf "\t    ZPE = %6.2f cm⁻¹, used for frequency shift in Fourier transform." zpe)
     compute_spectrum("WF.nc", 
                      input["params"]["stride"], input["params"]["dt"], input["params"]["Nsteps"];
                      maxWn=input["spectrum"]["maxWn"], minWN=input["spectrum"]["minWn"], 
                      zpe=zpe, lineshapeWidth=input["spectrum"]["linewidth"],
                      outname=outname)
 else
+    println(@sprintf "\t    ZPE = %6.2f cm⁻¹, used for frequency shift in Fourier transform." input["spectrum"]["ZPE"])
     compute_spectrum("WF.nc",
                      input["params"]["stride"], input["params"]["dt"], input["params"]["Nsteps"];
                      maxWn=input["spectrum"]["maxWn"], minWN=input["spectrum"]["minWn"],
@@ -140,4 +163,17 @@ else
 end
 
 write_GP(outname)
+
+fwhm = input["spectrum"]["linewidth"]
+println("\t  Lineshapes functions used to produce spectra:")
+println("\t    - Gaussian: exp( t² / (0.6 ⋅ $(input["spectrum"]["linewidth"]) fs)² )")
+println(@sprintf "\t    - Kubo:  exp(-( Δ²/γ² * (γ*t - 1 + exp(-γ*t)))); Δ = %8.6f fs⁻¹; γ = %8.6f fs⁻¹" 1/(fwhm*4/7) 1/fwhm )
+println("""
+\t  Spectra saved to: $outname.txt
+\t  Gnuplot script for plotting: $outname.gp
+""") 
+
+endtime = now()
+println("\n\tSuccessfully finished " * Dates.format(endtime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+
 
