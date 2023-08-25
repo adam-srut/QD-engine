@@ -36,7 +36,7 @@ BLAS.set_num_threads(1)
     - Read in relaxed ψ(t=0) from NetCDF file [x]
     - Stand alone computation of spectra (various lineshape widths) [x]
         - Frequency shift in Fourier Transform [x]
-    - Imaginary time propagation till an overlap threshold is reached 
+    - Imaginary time propagation till an overlap threshold is reached [x] 
 =#
 
 #=================================================
@@ -333,36 +333,43 @@ function create_harm_state_2D(;n::Int, xdim::Array{Float64}, ydim::Array{Float64
 end
 
 
-function imTime_propagation(dynamics::Dynamics; Nsteps::Int=5000)
+function imTime_propagation(dynamics::Dynamics)
     #= Function will propagate an arbitrary WF in imaginary time.
         Use to determine the initial WP. 
         WF is renormalized in the middle of the integration step. 
          =#
 
-    # Set up progress bar
-    print("\t  Progress:\n\t   ")
-    
+    # Setup imaginary time step
     dynamics.dt = -dynamics.dt*im
-    T_halfstep!(dynamics)
+    wfold = copy(dynamics.wf)
 
-    while dynamics.istep < Nsteps
-        
-        propagate!(dynamics)
+    while true 
+        # Propagate for 10 steps:
+        T_halfstep!(dynamics)
+        for _ in 1:9
+            propagate!(dynamics)
+        end
+        end_step!(dynamics)
+        dynamics.istep += 10
+
+        # Renormalize:
         WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
         dynamics.wf .= dynamics.wf / WFnorm
-        dynamics.istep += 1
 
-        # Update progress bar
-        if dynamics.istep in round.(Int, range(start=1, stop=Nsteps, length=10))
-            print( @sprintf "%2d%%" 100*dynamics.istep/Nsteps)
-            flush(stdout)
+        wf_change = abs(sqrt(dot(dynamics.wf, wfold)))
+        if 1-wf_change < 1e-15
+            break
         end
+        wfold .= dynamics.wf
     end
-    print("\n")
 
-    end_step!(dynamics)
     WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
     dynamics.wf .= dynamics.wf / WFnorm
+    
+    println("\n\t  Converged in $(dynamics.istep) steps")
+    println("\t    with threshold: (1 - |<ψ(t)|ψ(t+10Δt)>|) < 1e-15")
+
+    # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
     
@@ -554,7 +561,7 @@ print_init(metadata)
 
 if haskey(metadata.input, "imagT")
     println("\t========> Imaginary time propagation <=========")
-    #@info "Assuming the same grid for reference and actual potential.\n"
+    println("\n\t  Potential taken from: `$(metadata.input["imagT"]["gs_potential"])`")
     dynamics.potential = metadata.ref_potential
     dynamics = imTime_propagation(dynamics)
     dynamics.potential = metadata.potential

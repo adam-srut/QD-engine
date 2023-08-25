@@ -78,8 +78,8 @@ function print_init(metadata::MetaData)
     if metadata.input["params"]["dt"] > pi/3/(maximum(metadata.potential)-minimum(metadata.potential))
         @warn "Aliasing errors are likely to occur. Decrease the time step or check bounds of the potential."
     end
-    println("\t Minimal resolution of energy levels: ΔEₘᵢₙ = π/T:")
-    println(@sprintf "\t\t%8.4f cm⁻¹" pi/(metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"])*constants["Eh_to_wn"])
+    println("\t Minimal resolution of energy levels: ΔEₘᵢₙ = 2π/T:")
+    println(@sprintf "\t\t%8.4f cm⁻¹" 2*pi/(metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"])*constants["Eh_to_wn"])
     if haskey(metadata.input, "imagT")
         println("\t Imaginary time propagation requested.\n\t Reference and actual potential need to have the same spatial grid")
     end
