@@ -31,9 +31,9 @@ The time propagation in the package is implemented with 3 operators:
 
 ```math
 \begin{align}
-\hat{\mathcal{P}}_\mathrm{step} &= 
-    e^{-\frac{i}{\hbar}\hat{\mathcal{V}}\Delta t}
-    e^{-\frac{i}{\hbar}\hat{\mathcal{T}}\Delta t}\\
+\hat{\mathcal{P}}_\mathrm{step} &=
+    e^{-\frac{i}{\hbar}\hat{\mathcal{T}}\Delta t}
+    e^{-\frac{i}{\hbar}\hat{\mathcal{V}}\Delta t}\\
 \hat{\mathcal{P}}_\mathrm{init} &= 
     e^{-\frac{i}{\hbar}\frac{\hat{\mathcal{T}}}{2}\Delta t}\\
 \hat{\mathcal{P}}_\mathrm{end} &= 
