@@ -14,7 +14,7 @@ Only Hamiltonians in the following form are supported:
 
 *i.e.* dimensions $x$ and $y$ need to be linear motions in a many-dimensional space of atomic nuclei.
 ### Propagator
-The split operator formalism takes into account the non-commutability of $\hat{T}$ and $\hat{V}$, see equation bellow. In order to easily apply exponential form of a semi-local operator $\hat{T}$ the wavefunction is Fourier transfomed to the momentum space where $\hat{T}$ is a local operator.
+The split operator formalism considers the non-commutability of $\hat{T}$ and $\hat{V}$, see the equation below. In order to easily apply the exponential form of a semi-local operator $\hat{T}$ the wavefunction is Fourier transformed to the momentum space where $\hat{T}$ is a local operator.
 
 ```math
 \begin{equation}
@@ -37,7 +37,7 @@ The time propagation in the package is implemented with 3 operators:
 \hat{\mathcal{P}}_\mathrm{init} &= 
     e^{-\frac{i}{\hbar}\frac{\hat{\mathcal{T}}}{2}\Delta t}\\
 \hat{\mathcal{P}}_\mathrm{end} &= 
-    e^{-\frac{i}{\hbar}\hat{\mathcal{V}}\Delta t}e^{-\frac{i}{\hbar}\frac{\hat{\mathcal{T}}}{2}\Delta t}
+    e^{-\frac{i}{\hbar}\frac{\hat{\mathcal{T}}}{2}\Delta t}e^{-\frac{i}{\hbar}\hat{\mathcal{V}}\Delta t}
 \end{align}
 ```
 it is then only possible to propagate the wavefunction by $N+1$ steps with:
