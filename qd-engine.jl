@@ -355,7 +355,8 @@ function imTime_propagation(dynamics::Dynamics)
         # Renormalize:
         WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
         dynamics.wf .= dynamics.wf / WFnorm
-
+        
+        # Check convergence to the relaxed wave packet
         wf_change = abs(sqrt(dot(dynamics.wf, wfold)))
         if 1-wf_change < 1e-15
             break
