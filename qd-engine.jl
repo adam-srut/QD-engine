@@ -365,12 +365,15 @@ function imTime_propagation(dynamics::Dynamics)
             break
         elseif 1-wf_change < 1e-12 && !thresholds[3]
             println("\t  => Threshold 10⁻¹² reached at $(dynamics.istep) steps")
+            flush(stdout)
             thresholds[3] = true
         elseif 1-wf_change < 1e-10 && !thresholds[2]
             println("\t  => Threshold 10⁻¹⁰ reached at $(dynamics.istep) steps")
+            flush(stdout)
             thresholds[2] = true
         elseif 1-wf_change < 1e-8 && !thresholds[1]
             println("\t  => Threshold 10⁻⁸ reached at $(dynamics.istep) steps")
+            flush(stdout)
             thresholds[1] = true
         end
         wfold .= dynamics.wf
@@ -474,13 +477,13 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
            
             # Save wave packet
             if metadata.input["dimensions"] == 1
-                outdata.wf["WFRe"][:, irec] .= Float32.(real.(dynamics.wf))
-                outdata.wf["WFIm"][:, irec] .= Float32.(imag.(dynamics.wf))
+                outdata.wf["WFRe"][:, irec] = real.(dynamics.wf)
+                outdata.wf["WFIm"][:, irec] = imag.(dynamics.wf)
             elseif metadata.input["dimensions"] == 2
-                outdata.wf["WFRe"][:, :, irec] .= Float32.(real.(dynamics.wf))
-                outdata.wf["WFIm"][:, :, irec] .= Float32.(imag.(dynamics.wf))
+                outdata.wf["WFRe"][:, :, irec] = real.(dynamics.wf)
+                outdata.wf["WFIm"][:, :, irec] = imag.(dynamics.wf)
             end
-            #GC.gc() # call garbage collector
+            GC.gc() # call garbage collector
 
             T_halfstep!(dynamics) # Initialize new step
             dynamics.istep += 1
@@ -574,6 +577,7 @@ print_init(metadata)
 if haskey(metadata.input, "imagT")
     println("\t========> Imaginary time propagation <=========")
     println("\n\t  Potential taken from: `$(metadata.input["imagT"]["gs_potential"])`")
+    flush(stdout)
     dynamics.potential = metadata.ref_potential
     dynamics = imTime_propagation(dynamics)
     dynamics.potential = metadata.potential
