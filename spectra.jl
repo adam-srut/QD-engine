@@ -117,6 +117,7 @@ end
                 Main section
 ===================================================#
 
+########################## Info:
 starttime = now()
 println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
 
@@ -135,6 +136,7 @@ println("\t============> Spectra generation <============\n")
 println("\t  Spectrum as a Fourier transform of an autocorrelation function:")
 println("\t    σ(ν) = ν/2/π ∫ <ψ(0)|ψ(t)> ⋅ LS(t) exp(i2πνt) dt")
 println("\t    where LS(t) is a lineshape function.")
+###########################
 
 input = YAML.load_file(infile)
 
@@ -164,6 +166,7 @@ end
 
 write_GP(outname)
 
+############################ Info:
 fwhm = input["spectrum"]["linewidth"]
 println("\t  Lineshapes functions used to produce spectra:")
 println("\t    - Gaussian: exp( t² / (0.6 ⋅ $(input["spectrum"]["linewidth"]) fs)² )")

@@ -168,6 +168,7 @@ println(hello)
 println("\t=======> Potential fitting <========\n")
 println("\t  Using cubic splines")
 
+
 if ! haskey(input, "potfit")
     throw(ArgumentError("potfit keyword not found in the input file!"))
 end

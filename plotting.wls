@@ -47,7 +47,7 @@ Plot2D[potfile_, wffile_] :=
   grid = Table[
     pAmp = 
      Flatten[Table[{wffile["/Xdim"][[x]], wffile["/Ydim"][[y]], 
-        wffile["/PAmp"][[Round[t], x, y]]}, 
+        Abs[wffile["/WFRe"][[Round[t], x, y]] + I*wffile["/WFIm"][[Round[t], x, y]]]^2}, 
     {x, 1, Length[wffile["/Xdim"]], 10}, {y, 1, Length[wffile["/Ydim"]], 10}], 1];
     pAmpPlot = ListContourPlot[pAmp,
       PlotRange -> All,
@@ -64,11 +64,11 @@ Plot2D[potfile_, wffile_] :=
       ImageSize -> 200],
      Flatten@{Style[#, 12, Black, 
           FontFamily -> "Helvetica"] & /@ {"X [Bohrs]", "Y [Bohrs]", 
-         ToString[NumberForm[t*dt*stride*10/41.3413, {5, 1}]] <> " fs"}, 
+         ToString[NumberForm[t*dt*stride/41.3413, {5, 1}]] <> " fs"}, 
        Rotate[barleg, -Pi/2]},
      {Bottom, Left, Top, Right}, RotateLabel -> True, 
      Spacings -> {0.2, 0.2}],
-    {t, 1, Dimensions[wffile["/PAmp"]][[1]], Dimensions[wffile["/PAmp"]][[1]]/8}];
+    {t, 1, Dimensions[wffile["/WFRe"]][[1]], Dimensions[wffile["/WFRe"]][[1]]/8}];
   grid = Grid[ArrayReshape[grid, {2, 4}]];
   Export["PAmp_evol.pdf", grid];
   Export["PAmp_evol.png", Rasterize[grid, ImageResolution -> 400]];
@@ -83,12 +83,12 @@ Plot1D[potfile_, wffile_] :=
     ];
    cols = ColorData[97, "ColorList"][[;; 8]];
    times = Table[
-     ToString[NumberForm[t*dt*stride*10/41.3413, {5, 1}]] <> " fs",
-     {t, 1, Dimensions[wffile["/PAmp"]][[1]],Dimensions[wffile["/PAmp"]][[1]]/8}];
+     ToString[NumberForm[t*dt*stride/41.3413, {5, 1}]] <> " fs",
+     {t, 1, Dimensions[wffile["/WFRe"]][[1]],Dimensions[wffile["/WFRe"]][[1]]/8}];
    pAmp = Table[
-     Table[{wffile["/Xdim"][[i]], wffile["/PAmp"][[Round[t], i]]}, {i,
-        Length[wffile["/Xdim"]]}],
-     {t, 1, Dimensions[wffile["/PAmp"]][[1]],Dimensions[wffile["/PAmp"]][[1]]/8}
+     Table[{wffile["/Xdim"][[i]], Abs[wffile["/WFRe"][[Round[t], i]]+I*wffile["/WFIm"][[Round[t], i]]]^2},
+	 {i, Length[wffile["/Xdim"]]}],
+     {t, 1, Dimensions[wffile["/WFRe"]][[1]],Dimensions[wffile["/WFRe"]][[1]]/8}
     ];
    grid = Table[Labeled[
       CombinePlots[
@@ -117,6 +117,7 @@ Plot1D[potfile_, wffile_] :=
 
 (* ::Section:: *)
 (*Main code*)
+
 
 (*Print[
 "#============================================

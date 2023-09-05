@@ -36,7 +36,9 @@ BLAS.set_num_threads(1)
     - Read in relaxed ψ(t=0) from NetCDF file [x]
     - Stand alone computation of spectra (various lineshape widths) [x]
         - Frequency shift in Fourier Transform [x]
-    - Imaginary time propagation till an overlap threshold is reached [x] 
+    - Imaginary time propagation till an overlap threshold is reached [x]
+    - More refined progress bar
+    - Separate stride for wave packeti? + save amplitude and phase
 =#
 
 #=================================================
@@ -120,31 +122,30 @@ end
 function init_OutData(step_stride::Int, Nsteps::Int, wf0::Array{ComplexF64}, dt::Number)
     #= Initilize output data =#
     N_records = Int(fld(Nsteps, step_stride))
-    N_records_WF = Int(fld(Nsteps, step_stride*10)) # Increase stride for saving PAmp
     isfile("WF.nc") && rm("WF.nc")
     if ndims(wf0) == 1
         wfout = NCDataset("WF.nc", "c")
         wfout.attrib["title"] = "File contains temporal evolution of the wavepacket."
         defDim(wfout, "x", length(wf0))
-        defDim(wfout, "time", N_records_WF) 
-        defVar(wfout, "PAmp", Float32, ("x", "time"), deflatelevel=0)
+        defDim(wfout, "time", N_records) 
+        defVar(wfout, "WFRe", Float32, ("x", "time"), deflatelevel=0)
+        defVar(wfout, "WFIm", Float32, ("x", "time"), deflatelevel=0)
         defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
-        defDim(wfout, "timeCF", N_records)
-        defVar(wfout, "CFRe", Float64, ("timeCF", ))
-        defVar(wfout, "CFIm", Float64, ("timeCF", ))
+        defVar(wfout, "CFRe", Float64, ("time", ))
+        defVar(wfout, "CFIm", Float64, ("time", ))
     elseif ndims(wf0) == 2
         (nx,ny) = size(wf0)
         wfout = NCDataset("WF.nc", "c")
         wfout.attrib["title"] = "File contains temporal evolution of the wavepacket."
         defDim(wfout, "x", nx)
         defDim(wfout, "y", ny)
-        defDim(wfout, "time", N_records_WF) 
-        defVar(wfout, "PAmp", Float32, ("x", "y", "time"), deflatelevel=0)
+        defDim(wfout, "time", N_records) 
+        defVar(wfout, "WFRe", Float32, ("x", "y", "time"), deflatelevel=0)
+        defVar(wfout, "WFIm", Float32, ("x", "y", "time"), deflatelevel=0)
         defVar(wfout, "Xdim", Float64, ("x",), deflatelevel=0)
         defVar(wfout, "Ydim", Float64, ("y",), deflatelevel=0)
-        defDim(wfout, "timeCF", N_records)
-        defVar(wfout, "CFRe", Float64, ("timeCF", ))
-        defVar(wfout, "CFIm", Float64, ("timeCF", ))
+        defVar(wfout, "CFRe", Float64, ("time", ))
+        defVar(wfout, "CFIm", Float64, ("time", ))
     else
         error("Wrong dimensions of the inital WF.")
     end
@@ -342,6 +343,8 @@ function imTime_propagation(dynamics::Dynamics)
     # Setup imaginary time step
     dynamics.dt = -dynamics.dt*im
     wfold = copy(dynamics.wf)
+    
+    thresholds = [false, false, false]
 
     while true 
         # Propagate for 10 steps:
@@ -360,6 +363,15 @@ function imTime_propagation(dynamics::Dynamics)
         wf_change = abs(sqrt(dot(dynamics.wf, wfold)))
         if 1-wf_change < 1e-15
             break
+        elseif 1-wf_change < 1e-12 && !thresholds[3]
+            println("\t  => Threshold 10⁻¹² reached at $(dynamics.istep) steps")
+            thresholds[3] = true
+        elseif 1-wf_change < 1e-10 && !thresholds[2]
+            println("\t  => Threshold 10⁻¹⁰ reached at $(dynamics.istep) steps")
+            thresholds[2] = true
+        elseif 1-wf_change < 1e-8 && !thresholds[1]
+            println("\t  => Threshold 10⁻⁸ reached at $(dynamics.istep) steps")
+            thresholds[1] = true
         end
         wfold .= dynamics.wf
     end
@@ -367,8 +379,8 @@ function imTime_propagation(dynamics::Dynamics)
     WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
     dynamics.wf .= dynamics.wf / WFnorm
     
-    println("\n\t  Converged in $(dynamics.istep) steps")
-    println("\t    with threshold: (1 - |<ψ(t)|ψ(t+10Δt)>|) < 1e-15")
+    println("\n\t  Converged in $(dynamics.istep) steps!!!")
+    println("\t    with threshold: (1 - |<ψ(t)|ψ(t+10Δt)>|) < 10⁻¹⁵")
 
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
@@ -443,7 +455,7 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
 
         # Propagate
         propagate!(dynamics)
-        dynamics.istep += 1 # exp(-i*Δt*V̂)*exp(-i*Δt*T̂)ψ(t)
+        dynamics.istep += 1 # exp(-i*Δt*T̂)*exp(-i*Δt*V̂)ψ(t)
  
         # Update progress bar
         if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
@@ -460,22 +472,21 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             outdata.wf["CFRe"][irec] = real(overlap)
             outdata.wf["CFIm"][irec] = imag(overlap)
            
-            # Save probability amplitude with 10*stride
-            if mod(dynamics.istep, 10*dynamics.step_stride) == 0
-                irec = div(dynamics.istep, 10*dynamics.step_stride)
-                if metadata.input["dimensions"] == 1
-                    outdata.wf["PAmp"][:, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
-                elseif metadata.input["dimensions"] == 2
-                    outdata.wf["PAmp"][:, :, irec] .= Float32.(conj.(dynamics.wf) .* dynamics.wf)
-                end
-                #GC.gc() # call garbage collector
+            # Save wave packet
+            if metadata.input["dimensions"] == 1
+                outdata.wf["WFRe"][:, irec] .= Float32.(real.(dynamics.wf))
+                outdata.wf["WFIm"][:, irec] .= Float32.(imag.(dynamics.wf))
+            elseif metadata.input["dimensions"] == 2
+                outdata.wf["WFRe"][:, :, irec] .= Float32.(real.(dynamics.wf))
+                outdata.wf["WFIm"][:, :, irec] .= Float32.(imag.(dynamics.wf))
             end
+            #GC.gc() # call garbage collector
 
             T_halfstep!(dynamics) # Initialize new step
             dynamics.istep += 1
         end
     end
-    V_halfstep!(dynamics) # Complete integration
+    end_step!(dynamics) # Complete integration
     return outdata
 end
 
