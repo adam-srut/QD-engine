@@ -285,8 +285,8 @@ if haskey(input, "Raman")
     for finalstate in input["Raman"]["finalstate"]
         local outname, CF
         outname = "resRaman_0$finalstate"
-        CF = resRaman_corrF(finalstate, input)
         println("\t  Reading eigenstate with index $finalstate in `eigenstates.nc`.")
+        CF = resRaman_corrF(finalstate, input)
         
         compute_spectrum(CF, input["params"]["stride"], input["params"]["dt"], input["params"]["Nsteps"];
                          maxWn=input["Raman"]["maxWn"], minWN=input["Raman"]["minWn"],

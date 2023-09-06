@@ -125,6 +125,8 @@ function save_eigenstates(eigenstates::Array, WF::NCDataset, energies::Array)
             defVar(outfile, "WFRe", Float64, ("states", "x", "y"))
             defVar(outfile, "WFIm", Float64, ("states", "x", "y"))
             defVar(outfile, "energies", Float64, ("states", ))
+            outfile["Xdim"][:] = xdim
+            outfile["Ydim"][:] = ydim
             for (i, eigstate) in enumerate(eigenstates)
                 outfile["WFRe"][i, :, :] = real.(eigstate)
                 outfile["WFIm"][i, :, :] = imag.(eigstate)
