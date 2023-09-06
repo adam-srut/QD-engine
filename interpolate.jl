@@ -144,7 +144,9 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
             ylabel="Y [Bohr]",
             title="Interpolated potential",
             color=:lighttemperaturemap,
-            fill=true)
+            fill=true,
+            aspect_ratio=:equal,
+            size=(600,600))
     savefig(outname * ".png")
 end
 

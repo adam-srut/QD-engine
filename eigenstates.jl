@@ -1,10 +1,11 @@
-#! /usr/bin/julia
+#! /usr/bin/env julia
 
-using NCDatasets
-using YAML
+using LinearAlgebra
+using NCDatasets, YAML
 using ArgParse
-using Plots
+using Plots, Plots.PlotMeasures
 using Dates
+using Trapz
 
 #=================================================
             Parse arguments
@@ -69,7 +70,7 @@ function compute_eigenstate(WF::NCDataset, energy::Number, input::Dict)
     =# 
     dimensions = length(size(WF["WFRe"])) - 1
     NSteps = size(WF["WFRe"])[end]
-    T = NSteps*input["params"]["dt"]*input["params"]["stride"]
+    #T = NSteps*input["params"]["dt"]*input["params"]["stride"]
     energy = energy/constants["Eh_to_wn"]
     if dimensions == 1
         eigenstate = zeros(size(WF["WFRe"])[1]) .+ 0im
@@ -78,6 +79,8 @@ function compute_eigenstate(WF::NCDataset, energy::Number, input::Dict)
             wf = WF["WFRe"][:, ti] .+ 1im*WF["WFIm"][:, ti]
             eigenstate .+= wf * exp( im*t*energy )
         end
+        wfnorm = trapz( WF["Xdim"][:], conj.(eigenstate) .* eigenstate )
+        eigenstate = eigenstate/wfnorm
     elseif dimensions == 2
         eigenstate = zeros(size(WF["WFRe"])[1], size(WF["WFRe"])[2]) .+ 0im
         for ti in 1:NSteps
@@ -85,8 +88,11 @@ function compute_eigenstate(WF::NCDataset, energy::Number, input::Dict)
             wf = WF["WFRe"][:, :, ti] .+ 1im*WF["WFIm"][:, :, ti]
             eigenstate .+= wf * exp( im*t*energy )
         end
-    end
-    eigenstate = eigenstate/T
+        wfnorm = trapz( (WF["Xdim"][:], WF["Ydim"][:]), conj.(eigenstate) .* eigenstate )
+        eigenstate = eigenstate/wfnorm
+    end 
+    eng = Int(round(round(energy*constants["Eh_to_wn"])))
+    println("\t    => Eigenstate at energy $eng cm⁻¹ done.")
     return eigenstate
 end
 
@@ -104,8 +110,8 @@ function save_eigenstates(eigenstates::Array, WF::NCDataset, energies::Array)
             defVar(outfile, "energies", Float64, ("states", ))
             outfile["Xdim"][:] = xdim
             for (i, eigstate) in enumerate(eigenstates)
-                outfile["WFRe"][i, :] .= real.(eigstate[i])
-                outfile["WFIm"][i, :] .= imag.(eigstate[i])
+                outfile["WFRe"][i, :] = real.(eigstate)
+                outfile["WFIm"][i, :] = imag.(eigstate)
                 outfile["energies"][i] = energies[i]
             end
         else
@@ -120,8 +126,8 @@ function save_eigenstates(eigenstates::Array, WF::NCDataset, energies::Array)
             defVar(outfile, "WFIm", Float64, ("states", "x", "y"))
             defVar(outfile, "energies", Float64, ("states", ))
             for (i, eigstate) in enumerate(eigenstates)
-                outfile["WFRe"][i, :, :] .= real.(eigstate[i])
-                outfile["WFIm"][i, :, :] .= imag.(eigstate[i])
+                outfile["WFRe"][i, :, :] = real.(eigstate)
+                outfile["WFIm"][i, :, :] = imag.(eigstate)
                 outfile["energies"][i] = energies[i]
             end
         end
@@ -153,11 +159,15 @@ function plot_eigenstates(WF::NCDataset, eigenstates::Array, energies::Array)
         xdim = WF["Xdim"][:]
         ydim = WF["Ydim"][:]
         for (state, eng) in zip(eigenstates, energies)
-            contour(xdim, ydim, real.(state),
+            contourf(xdim, ydim, real.(state),
                     color=:lightrainbow,
                     xlabel="X [Bohr]", ylabel = "Y [Bohr]",
-                    legend=false, fill=true,
-                    title="Energy $eng cm⁻¹")
+                    legend=true, levels=10, lw=1.4,
+                    framestyle=:box, aspect_ratio=:equal,
+                    right_margin=5mm,
+                    title="Energy $eng cm⁻¹",
+                    size=(500,460)
+                    )
             savefig("eigenstate_$(round(eng)).pdf")
         end
     end
@@ -170,17 +180,14 @@ end
 ####################################### Info section:
 starttime = now()
 println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
-
-hello = """
-
+println("""
 \t#====================================================
 \t            Quantum Dynamics Engine
 \t====================================================#
 \t
 \t               Don't Panic!
 
-   """
-   println(hello)
+""")
 ########################################
 
 # Read input data
@@ -190,14 +197,11 @@ input = YAML.load_file(args["input"])
 WF = NCDataset("WF.nc", "r")
 
 ######################################## Info section:
-info = """\t============> Spectral method for eigenstates <============\n
+println("""\t============> Spectral method for eigenstates <============\n
 \t  Computed as a Fourier transform of a wave packet at a given energy:
 \t  ψ(x,y,E) = ∫ ψ(x,y,t) exp(itE/ħ) dt
   
-\t  Wave packet evolution taken from `WF.nc` file.
-\t  Calculation requested at energies (in cm⁻¹):
-\t    $(input["eigstates"]["energies"])"""
-println(info)
+\t  Wave packet evolution taken from `WF.nc` file.""")
 ########################################
 
 
@@ -212,6 +216,6 @@ plot_eigenstates(WF, eig_states, eig_engs)
 close(WF)
 
 ######################################## Info section:
-
+println("\n\t  Results saved to `eigenstates.nc` file.")
 endtime = now()
 println("\n\tSuccessfully finished " * Dates.format(endtime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
