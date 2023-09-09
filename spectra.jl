@@ -290,7 +290,7 @@ if haskey(input, "Raman")
         
         compute_spectrum(CF, input["params"]["stride"], input["params"]["dt"], input["params"]["Nsteps"];
                          maxWn=input["Raman"]["maxWn"], minWN=input["Raman"]["minWn"],
-                         zpe=zpe, lineshapeWidth=250,
+                         zpe=zpe, lineshapeWidth=input["Raman"]["linewidth"],
                          outname=outname, powerspectrum=true) 
         write_GP(outname)
         println("""\t  => Spectra saved to: $outname.txt; $outname.gp""")

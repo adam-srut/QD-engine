@@ -14,7 +14,7 @@ Only Hamiltonians in the following form are supported:
 
 *i.e.* dimensions $x$ and $y$ need to be mutually orthogonal, linear motions in a many-dimensional space of atomic nuclei.
 ### Propagator
-The split operator formalism considers the non-commutability of $\hat{T}$ and $\hat{V}$, see the equation below. In order to easily apply the exponential form of a semi-local operator $\hat{T}$ the wavefunction is Fourier transformed to the momentum space where $\hat{T}$ is a local operator.
+The split operator formalism [1] considers the non-commutability of $\hat{T}$ and $\hat{V}$, see the equation below. In order to easily apply the exponential form of a semi-local operator $\hat{T}$ the wavefunction is converted to the momentum space via Fourier transform where $\hat{T}$ is a local operator.
 
 ```math
 \begin{equation}
@@ -25,6 +25,8 @@ The split operator formalism considers the non-commutability of $\hat{T}$ and $\
     \psi(x,y,t)
 \end{equation}
 ```
+
+&nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433.
 
 ## Implementation
 The time propagation is implemented with 3 operators:
@@ -52,7 +54,7 @@ Note that in order to compute the correlation function it is necessary to end th
 ## Usage
 ### Preparing the potentials
 
-The potential from *ab initio* calculations needs to be interpolated to achieve a fine grid spacing and converted to the NetCDF format. This can be done with the `interpolate.jl` script. Potential needs to be provided in a form shown bellow:
+The potential from *ab initio* calculations needs to be interpolated to achieve a fine grid spacing and converted to the NetCDF format. This can be done with the `interpolate.jl` script. Potential needs to be provided in the form shown bellow:
 ```
 #   X [Bohr]       E [Hartree]
     -0.9448631     0.5890509
@@ -60,20 +62,22 @@ The potential from *ab initio* calculations needs to be interpolated to achieve 
     -0.9070685     0.5429431
     -0.8881713     0.5205947
 ```
-User thus has to provide a simple `.txt` file with two columns containing potisiton and energy, both in atomic units. For two-dimensional potential the file has to containt three columns, `X Y E`.
+The user thus has to provide a simple `.txt` file with two columns containing position and energy, both in atomic units. For two-dimensional potential, the file has to contain three columns, `X Y E`.
 Please note that only **regular grids** are supported, since the interpolation is done with cubic splines.
 
-To prepate the potential file, user has to provide an input file with the following section:
+To prepare the potential file, the user has to provide an input file with the following section:
 ```
 potfit:
     potfile: "ab-initio_scan.txt"
-    NPoints: 2048 
+    NPoints: 2048   # [1024, 1024] for 2D potential
     name: "GS_potential.nc"
 ```
 By running the command bellow the script will read the data in `ab-initio_scan.txt`, performs an interpolation with cubic splines and return a potential with 2048 grid points in file `GS_potential.nc` which is readable by `qd-engine.jl`.
 ```
 $ interpolate.jl input.yml
 ```
+
+---
 ### Running dynamics
 To run the exact quantum dynamics in a split-operator formalism, some essential parameters has to be provided in the YAML input file. The mininal working example of input file is showed bellow:
 ```
@@ -104,28 +108,29 @@ The dynamics can be then simply run by:
 $ qd-engine.jl input.yml
 ```
 #### Basic parameters
-The essential parameters for the dynamics is the time step `dt` (provided in atomic units) and the number of steps `Nsteps`.
-The keyword stride determines how often the dynamics is completed to the full intergration step (see Implementation section above) and a point to the correlation function is added.
-The probability amplitude of the wave packet is saved to the file `WF.nc` with different stride: $10 \times$`stride`.
+The essential parameters for the dynamics are the time step `dt` (provided in atomic units) and the number of steps `Nsteps`.
+The keyword stride determines how often the dynamics are completed to the full integration step (see Implementation section above) and a point to the correlation function is added.
+The amplitude and phase of the wave packet are saved to the file `WF.nc` with a given stride. Note that this file might get large **(tens of GBs)** for two-dimensional dynamics.
 
 #### Potential energy
 The potential energy operator $\hat{\mathcal{V}}(x,y)$ has to be provided in the NetCDF format created by `interpolate.jl` script (see above). The file with the potential is supplied through the keyword `potential` in the input file.
 
 #### Kinetic energy
-The form of the kinetic energy operator $\hat{\mathcal{T}}$ is restricted by the equation in the Hamiltonian section above. Only the mass of the ficticious particle needs to be specified through the keyword `mass`. In case of the two-dimensional dynamics, the masses are provided as a list: $[\mu_x, \mu_y]$.
+The form of the kinetic energy operator $\hat{\mathcal{T}}$ is restricted by the equation in the Hamiltonian section above. Only the mass of the fictitious particle needs to be specified through the keyword `mass`. In the case of the two-dimensional dynamics, the masses are provided as a list: $[\mu_x, \mu_y]$.
 
 #### Initial condition
-The script supports defining the initial condition as a real Gaussian wave packet, to achieve that the center and the width of the wave packet needs to be provided through `initpos` and `freq` keywords in the `initWF` block of the input file. The `initpos` expects a value in Bohrs while `freq` a value in cm<sup>-1</sup>. For the two-dimensional dynamics both variables need to be providede as lists. The Gaussian wave packet is then constructed according to:
+The script supports defining the initial condition as a real Gaussian wave packet, to achieve that the center and the width of the wave packet needs to be provided through `initpos` and `freq` keywords in the `initWF` block of the input file. The `initpos` expects value in Bohrs while `freq` a value in cm<sup>-1</sup>. For the two-dimensional dynamics, both variables need to be provided as lists. The Gaussian wave packet is then constructed according to:
 ```math
 \begin{equation}
 \psi_0(x) = \exp{ \left( -\nu\,\pi\,\mu \cdot (x-x_0)^2 \right) }
 \end{equation}
 ```
 
-It is furthermore possible to provide the inital wave function as a NetCDF file, if keyword `fromfile` is present. Such file needs to containt dimension `x` (optionally also `y`) and variables `wfRe` (real part) and `wfIm` (imaginary part) spanned along this dimension.
+It is furthermore possible to provide the initial wave function as a NetCDF file if the keyword `fromfile` is present. This file needs to contain dimension `x` (optionally also `y`) and variables `wfRe` (real part) and `wfIm` (imaginary part) spanned along this dimension.
 
 Lastly, the initial conditions can be determined by an imaginary time propagation described in the following section.
 
+---
 ### Imaginary time propagation
 For finding the lowest eigenstate the imaginary time propagation is implemented, the wave packet is propagated by 
 $\psi(t+\Delta \tau) = e^{-\frac{1}{\hbar} \hat{\mathcal{H}}\Delta \tau}\psi(t)$ where $\tau = -it$.
@@ -136,13 +141,14 @@ imagT:
 ```
 After the relaxation, the file `initWF.nc` will be created, it contains the relaxed wave function and the zero-point energy.
 
-The timestep employed in the imaginary time propagation is 1 a.u. The propagation is terminated after a convergence criterion is reached. The implemented criterion is that that the overlap of two wave packets separated by $10\Delta \tau$ does not differ from one by more than $10^{-15}$.
+The timestep employed in the imaginary time propagation is 1 a.u. The propagation is terminated after a convergence criterion is reached. The implemented criterion is that the overlap of two wave packets separated by $10\Delta \tau$ does not differ from one by more than $10^{-15}$.
 ```math
 \begin{equation}
 1-|\langle \psi(t+10\Delta\tau) | \psi(t) \rangle| < 10^{-15}
 \end{equation}
 ```
 
+---
 ### Calculation of spectra
 The energy spectrum is calculated after each run from the auto-correlation function according to:
 ```math
@@ -176,3 +182,44 @@ The frequency shift is provided by `ZPE` keyword either as a number or as `read`
     \cdot \mathrm{LS}(t)\,e^{i(\omega + \frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
+---
+### Eigenstates
+The spectral method for calculating eigenstates is implemented in `eigenstates.jl` script. The eigenstate is obtained as a Fourier transform of a moving wave packet at a given energy, as shown in the equation bellow. It is thus necessary to know the eigenenergies in advance and provide them as input.
+ 
+```math
+\begin{equation}
+    \psi(x,y,E_i) = \frac{1}{T}\int\limits_0^T \psi(x,y,t) \cdot e^{ it\frac{E_i}{\hbar} } \mathrm{d}t
+\end{equation}
+```
+The temporal evolution will be read from `WF.nc` file, note that storing this file will be memory extensive for two-dimensional dynamics.
+The user has to provide a list of energies (in cm<sup>-1</sup>) at which the eigenstates will be calculated, the following section has to appear in the input file:
+```
+# Compute eigenstates using a spectral method (read only by eigenstates.jl)
+eigstates:
+    energies: [500, 1500, 2500, 3500] 
+```
+
+---
+### Resonance Raman absorption cross-section
+Heller's method for calculating the absorption cross-section for resonance Raman scattering is implemented.
+The central quantity of the method is frequency dependent polarizability:
+```
+\begin{equation}
+\alpha_{i\rightarrow f}(\omega_I) = \int\limits_0^T e^{i\omega_It}
+\langle\psi_f|\hat{\mu}_{f\rightarrow i} e^{-\frac{i}{\hbar}\hat{\mathcal{H}}_2t}\hat{\mu}_{i\rightarrow f}|\psi_i(0)\rangle~
+\mathrm{d}t
+\end{equation}
+```
+The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated on its potential $\hat{\mathcal{H}}_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
+
+The analysis is done by `spectra.jl` script, and the parameters are controlled by the following section in the input file:
+```
+# Resonance Raman absorption cross section (read only by spectra.jl)
+Raman:
+    maxWn: 20000
+    minWn: 3000
+    ZPE: "read"
+    linewidth: 250
+    finalstate: 2 # index of the final eigenstate in `eigenstates.nc`
+```
+The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
