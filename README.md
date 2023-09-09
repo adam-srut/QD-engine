@@ -26,6 +26,7 @@ The split operator formalism [1] considers the non-commutability of $\hat{T}$ an
 \end{equation}
 ```
 
+---
 &nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433.
 
 ## Implementation
@@ -203,11 +204,11 @@ eigstates:
 ### Resonance Raman absorption cross-section
 Heller's method for calculating the absorption cross-section for resonance Raman scattering is implemented.
 The central quantity of the method is frequency dependent polarizability:
-```
+```math
 \begin{equation}
-\alpha_{i\rightarrow f}(\omega_I) = \int\limits_0^T e^{i\omega_It}
+\alpha_{i\rightarrow f}(\omega_I) = \int\limits_0^T 
 \langle\psi_f|\hat{\mu}_{f\rightarrow i} e^{-\frac{i}{\hbar}\hat{\mathcal{H}}_2t}\hat{\mu}_{i\rightarrow f}|\psi_i(0)\rangle~
-\mathrm{d}t
+e^{i(\omega_I+\frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
 The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated on its potential $\hat{\mathcal{H}}_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
