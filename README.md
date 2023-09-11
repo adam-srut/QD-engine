@@ -2,6 +2,13 @@
 
 Exact quantum dynamics on one- or two-dimensional potentials from *ab initio* calculations. 
 
+## Installation
+The package relies only on Julia (tested against version 1.9.0) and does not have to be compiled. The following packages are needed:
+```
+ArgParse, Plots, NCDatasets, Trapz, SpecialPolynomials, FFTW, OffsetArrays, YAML, Dates, UnicodePlots, Interpolations
+```
+To enhance performance you can use Intel's MKL for Fourier transform with `FFTW.set_provider!("mkl")` in Julia REPL.
+
 ## Theory
 ### Hamiltonian
 Only Hamiltonians in the following form are supported:
@@ -12,7 +19,8 @@ Only Hamiltonians in the following form are supported:
 \end{equation}
 ```
 
-*i.e.* dimensions $x$ and $y$ need to be mutually orthogonal, linear motions in a many-dimensional space of atomic nuclei.
+*i.e.* dimensions $x$ and $y$ need to be mutually orthogonal, linear motions in a many-dimensional space of atomic nuclei. Propagation of the wave packet is then done adiabatically on the potential $\hat{\mathcal{V}}(x,y)$.
+
 ### Propagator
 The split operator formalism [1] considers the non-commutability of $\hat{T}$ and $\hat{V}$, see the equation below. In order to easily apply the exponential form of a semi-local operator $\hat{T}$ the wavefunction is converted to the momentum space via Fourier transform where $\hat{T}$ is a local operator.
 
@@ -27,7 +35,7 @@ The split operator formalism [1] considers the non-commutability of $\hat{T}$ an
 ```
 
 ---
-&nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433.
+&nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433. [DOI](https://doi.org/10.1016/0021-9991(82)90091-2)
 
 ## Implementation
 The time propagation is implemented with 3 operators:
@@ -202,16 +210,17 @@ eigstates:
 
 ---
 ### Resonance Raman absorption cross-section
-Heller's method for calculating the absorption cross-section for resonance Raman scattering is implemented.
-The central quantity of the method is frequency dependent polarizability:
+Heller's method for calculating the absorption cross-section for resonance Raman scattering is implemented. [2]
+The central quantity of the method is the frequency dependent polarizability:
 ```math
 \begin{equation}
 \alpha_{i\rightarrow f}(\omega_I) = \int\limits_0^T 
-\langle\psi_f|\hat{\mu}_{f\rightarrow i} e^{-\frac{i}{\hbar}\hat{\mathcal{H}}_2t}\hat{\mu}_{i\rightarrow f}|\psi_i(0)\rangle~
+\langle\psi_f|\hat{\mu}_{2\rightarrow 1} e^{-\frac{i}{\hbar}\hat{\mathcal{H}}_2t}\hat{\mu}_{1\rightarrow 2}|\psi_i(0)\rangle~
 e^{i(\omega_I+\frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
-The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated on its potential $\hat{\mathcal{H}}_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
+The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated on its potential $\hat{\mathcal{H}}\_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state $\psi_f$. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
+The Raman absorption cross-section is then: $\sigma(\omega_I)\propto\omega_I|\alpha_{i\rightarrow f}(\omega_I)|^2$.
 
 The analysis is done by `spectra.jl` script, and the parameters are controlled by the following section in the input file:
 ```
@@ -224,3 +233,7 @@ Raman:
     finalstate: 2 # index of the final eigenstate in `eigenstates.nc`
 ```
 The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
+
+&nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*. **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
+
+---

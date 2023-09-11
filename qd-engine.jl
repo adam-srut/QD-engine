@@ -37,8 +37,6 @@ BLAS.set_num_threads(1)
     - Stand alone computation of spectra (various lineshape widths) [x]
         - Frequency shift in Fourier Transform [x]
     - Imaginary time propagation till an overlap threshold is reached [x]
-    - More refined progress bar
-    - Separate stride for wave packeti? + save amplitude and phase
 =#
 
 #=================================================
