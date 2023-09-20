@@ -58,12 +58,12 @@ it is then only possible to propagate the wavefunction by $N+1$ steps with:
 \end{equation}
 ```
 Such implementation allows to omit Fourier transform two times per step and thus enhances performance. 
-Note that in order to compute the correlation function it is necessary to end the propagation to the next integer time step.
+Note that in order to compute the correlation function it is necessary to end the propagation to the next integer time step. $N$ is thus determined by the stride for saving the results of the dynamics.
 
 ## Usage
 ### Preparing the potentials
 
-The potential from *ab initio* calculations needs to be interpolated to achieve a fine grid spacing and converted to the NetCDF format. This can be done with the `interpolate.jl` script. Potential needs to be provided in the form shown bellow:
+The potential from *ab initio* calculations needs to be interpolated to achieve a fine grid spacing and converted to the NetCDF format. This is be done with the `interpolate.jl` script. Potential needs to be provided in the following form:
 ```
 #   X [Bohr]       E [Hartree]
     -0.9448631     0.5890509
@@ -83,12 +83,12 @@ potfit:
 ```
 By running the command bellow the script will read the data in `ab-initio_scan.txt`, performs an interpolation with cubic splines and return a potential with 2048 grid points in file `GS_potential.nc` which is readable by `qd-engine.jl`.
 ```
-$ interpolate.jl input.yml
+interpolate.jl input.yml
 ```
 
 ---
 ### Running dynamics
-To run the exact quantum dynamics in a split-operator formalism, some essential parameters has to be provided in the YAML input file. The mininal working example of input file is showed bellow:
+To run the exact quantum dynamics in a split-operator formalism, some essential parameters has to be provided in the YAML input file. A mininal working example of input file is showed bellow:
 ```
 # Input file for Quantum Dynamics Engine
 # Number of dimensions:
@@ -114,7 +114,7 @@ initWF:
 ```
 The dynamics can be then simply run by:
 ```
-$ qd-engine.jl input.yml
+qd-engine.jl input.yml
 ```
 #### Basic parameters
 The essential parameters for the dynamics are the time step `dt` (provided in atomic units) and the number of steps `Nsteps`.
@@ -142,7 +142,7 @@ Lastly, the initial conditions can be determined by an imaginary time propagatio
 ---
 ### Imaginary time propagation
 For finding the lowest eigenstate the imaginary time propagation is implemented, the wave packet is propagated by 
-$\psi(t+\Delta \tau) = e^{-\frac{1}{\hbar} \hat{\mathcal{H}}\Delta \tau}\psi(t)$ where $\tau = -it$.
+$\psi(t+\Delta \tau) = e^{-\frac{1}{\hbar} \hat{\mathcal{H}}\Delta \tau}\psi(t)$ where $\tau = it$.
 To request the imaginary time propagation the following section has to be added to the input file, specifying only the potential on which the propagation will be carried out.
 ```
 imagT:
@@ -150,10 +150,10 @@ imagT:
 ```
 After the relaxation, the file `initWF.nc` will be created, it contains the relaxed wave function and the zero-point energy.
 
-The timestep employed in the imaginary time propagation is 1 a.u. The propagation is terminated after a convergence criterion is reached. The implemented criterion is that the overlap of two wave packets separated by $10\Delta \tau$ does not differ from one by more than $10^{-15}$.
+The propagation is terminated after a convergence criterion is reached. The implemented criterion is that the change in the energy between 10 successive timesteps is smaller than $10^{-10}$ Hartree.
 ```math
 \begin{equation}
-1-|\langle \psi(t+10\Delta\tau) | \psi(t) \rangle| < 10^{-15}
+| \langle\psi(\tau)| \hat{\mathcal{H}} | \psi(\tau)\rangle - \langle\psi(\tau+10\Delta\tau)| \hat{\mathcal{H}} | \psi(\tau+10\Delta\tau)\rangle | < 10^{-10} E_\mathrm{h}
 \end{equation}
 ```
 
@@ -162,16 +162,16 @@ The timestep employed in the imaginary time propagation is 1 a.u. The propagatio
 The energy spectrum is calculated after each run from the auto-correlation function according to:
 ```math
 \begin{equation}
-\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{\infty} \langle \psi(0) | \psi(t) \rangle
+\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{T} \langle \psi(0) | \psi(t) \rangle
     \cdot \mathrm{LS}(t)\,e^{i\omega t} \mathrm{d}t
 \end{equation}
 ```
 Here, $\mathrm{LS}(t)$ is a lineshape function. By default four different lineshape functions are used and results are saved in `spectrum.txt` file:
 
  1. No lineshape, equivalent to a rectangular window. 
- 2. Hann window: $1-\cos\left(\frac{2\pi t}{T}\right) \forall t \in (0,T); 0~elsewhere$ 
- 3. Gaussian lineshape: $\exp\left(-\frac{t^2}{0.6\cdot \mathrm{FWHM}}\right)$, the default value of FWHM is $250$ fs.
- 4. Kubo lineshape: $\exp\left(\frac{\Delta^2}{\gamma^2}\cdot(\gamma\cdot t-1+e^{-\gamma\cdot t}) \right)$, the default values of the parameters are: $\gamma = 250$ fs<sup>-1</sup>, $\Delta = \frac{4}{7}\cdot250$ fs<sup>-1</sup>.
+ 2. Hann window: $\mathrm{LS}(t)=1-\cos\left(\frac{2\pi t}{T}\right) \forall t \in (0,T); 0~elsewhere$ 
+ 3. Gaussian lineshape: $\mathrm{LS}(t)=\exp\left(-\frac{t^2}{0.6\cdot \mathrm{FWHM}}\right)$, the default value of FWHM is $250$ fs.
+ 4. Kubo lineshape: $\mathrm{LS}(t)=\exp\left(\frac{\Delta^2}{\gamma^2}\cdot(\gamma\cdot t-1+e^{-\gamma\cdot t}) \right)$, the default values of the parameters are: $\gamma = 250$ fs<sup>-1</sup>, $\Delta = \frac{4}{7}\cdot250$ fs<sup>-1</sup>.
 
 For a calculation of vibronic spectra the script `spectra.jl` can be used to change adjust the spectral range, parameters of the lineshape functions or adding a frequency shift to the Fourier transform.
 Following section can be then added to the input file:
@@ -187,7 +187,7 @@ spectrum:
 The frequency shift is provided by `ZPE` keyword either as a number or as `read` which takes the ZPE from `initWF.nc` file genereted with imaginary time propagation. The frequency shift is then applied as:
 ```math
 \begin{equation}
-\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{\infty} \langle \psi(0) | \psi(t) \rangle
+\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{T} \langle \psi(0) | \psi(t) \rangle
     \cdot \mathrm{LS}(t)\,e^{i(\omega + \frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
@@ -200,7 +200,7 @@ The spectral method for calculating eigenstates is implemented in `eigenstates.j
     \psi(x,y,E_i) = \frac{1}{T}\int\limits_0^T \psi(x,y,t) \cdot e^{ it\frac{E_i}{\hbar} } \mathrm{d}t
 \end{equation}
 ```
-The temporal evolution will be read from `WF.nc` file, note that storing this file will be memory extensive for two-dimensional dynamics.
+The temporal evolution of the wavefunction $\psi(x,y,t)$ will be read from `WF.nc` file. Note that the final eigenstates will not be normalized (every state will have a different normalization).
 The user has to provide a list of energies (in cm<sup>-1</sup>) at which the eigenstates will be calculated, the following section has to appear in the input file:
 ```
 # Compute eigenstates using a spectral method (read only by eigenstates.jl)
@@ -219,7 +219,7 @@ The central quantity of the method is the frequency dependent polarizability:
 e^{i(\omega_I+\frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
-The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated on its potential $\hat{\mathcal{H}}\_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state $\psi_f$. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
+The interpretation of the formula is intuitive: the initial scattering state $\psi_i(0)$ is excited to the higher electronic state and propagated with the respective Hamiltonian $\hat{\mathcal{H}}\_2$ for time *t*. The wavepacket is then deexcited back to the ground state and projected onto the final scattering state $\psi_f$. The method is implemented with Condon approximation, *i.e.* $\hat{\mu}\neq\hat{\mu}(R)$. 
 The Raman absorption cross-section is then: $\sigma(\omega_I)\propto\omega_I|\alpha_{i\rightarrow f}(\omega_I)|^2$.
 
 The analysis is done by `spectra.jl` script, and the parameters are controlled by the following section in the input file:
@@ -234,6 +234,6 @@ Raman:
 ```
 The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
 
-&nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*. **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
+&nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*, **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
 
 ---

@@ -14,31 +14,6 @@ using Trapz
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(1)
 
-#=
-    TODO:
-    - Object oriented version [x]
-        - test 2D dynamics [x]
-        - complete NetCDF interface [x]
-    - Analyses:
-        - CF + IO [x]
-        - WF + IO [x]
-        - spectra + IO [x]
-        - lineshape function [x] 
-        - eigenstates + IO (see Feit & Fleck paper)
-    - Info section [x]
-    - Add benchmark of Nr of grid points [x]
-    - Add fail checker - Nyquist + ΔE_min [x]
-        - Check for WF at boundaries
-    - Add plotting routines [x]
-    - Add interpolation scheme [x]
-        - Support for irregular grids
-    - Special stride for PAmp [x]
-    - Read in relaxed ψ(t=0) from NetCDF file [x]
-    - Stand alone computation of spectra (various lineshape widths) [x]
-        - Frequency shift in Fourier Transform [x]
-    - Imaginary time propagation till an overlap threshold is reached [x]
-=#
-
 #=================================================
             Parse arguments
 =================================================#
@@ -340,7 +315,7 @@ function imTime_propagation(dynamics::Dynamics)
 
     # Setup imaginary time step
     dynamics.dt = -dynamics.dt*im
-    wfold = copy(dynamics.wf)
+    (eold, _, _) =  compute_energy(dynamics, metadata)
     
     thresholds = [false, false, false]
 
@@ -358,36 +333,36 @@ function imTime_propagation(dynamics::Dynamics)
         dynamics.wf .= dynamics.wf / WFnorm
         
         # Check convergence to the relaxed wave packet
-        wf_change = abs(sqrt(dot(dynamics.wf, wfold)))
-        if 1-wf_change < 1e-15
+        (enew, _, _) =  compute_energy(dynamics, metadata)
+        if abs(enew-eold) < 1e-10
             break
-        elseif 1-wf_change < 1e-12 && !thresholds[3]
-            println("\t  => Threshold 10⁻¹² reached at $(dynamics.istep) steps")
+        elseif abs(enew-eold) < 1e-9 && !thresholds[3]
+            println("\t  => ΔE < 10⁻⁹ at $(dynamics.istep) steps")
             flush(stdout)
             thresholds[3] = true
-        elseif 1-wf_change < 1e-10 && !thresholds[2]
-            println("\t  => Threshold 10⁻¹⁰ reached at $(dynamics.istep) steps")
+        elseif abs(enew-eold) < 1e-8 && !thresholds[2]
+            println("\t  => ΔE < 10⁻⁸ at $(dynamics.istep) steps")
             flush(stdout)
             thresholds[2] = true
-        elseif 1-wf_change < 1e-8 && !thresholds[1]
-            println("\t  => Threshold 10⁻⁸ reached at $(dynamics.istep) steps")
+        elseif abs(enew-eold) < 1e-7 && !thresholds[1]
+            println("\t  => ΔE < 10⁻⁷ at $(dynamics.istep) steps")
             flush(stdout)
             thresholds[1] = true
         end
-        wfold .= dynamics.wf
+        eold = enew
     end
 
     WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
     dynamics.wf .= dynamics.wf / WFnorm
     
     println("\n\t  Converged in $(dynamics.istep) steps!!!")
-    println("\t    with threshold: (1 - |<ψ(t)|ψ(t+10Δt)>|) < 10⁻¹⁵")
+    println("\t    with threshold: ΔE(10Δτ) < 10⁻¹⁰ Eh")
 
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
     
-    (energy, Epot, Ekin) = compute_energy(dynamics, metadata)
+    (energy, Epot, Ekin) = compute_energy(dynamics, metadata) .* constants["Eh_to_wn"]
     println(@sprintf "\n\t  Energy of the WP:%10.2f cm^-1." energy)
 
     # Save the initial condition:
@@ -480,8 +455,8 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
             elseif metadata.input["dimensions"] == 2
                 outdata.wf["WFRe"][:, :, irec] = real.(dynamics.wf)
                 outdata.wf["WFIm"][:, :, irec] = imag.(dynamics.wf)
+                GC.gc() # call garbage collector
             end
-            GC.gc() # call garbage collector
 
             T_halfstep!(dynamics) # Initialize new step
             dynamics.istep += 1

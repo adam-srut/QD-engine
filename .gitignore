@@ -5,6 +5,7 @@ test
 qd-engine-resRaman.jl
 obsolete-functions.jl
 *.nc
+*.nb
 *.png
 .ipynb_checkpoints/
 2D-dynamics.jl
@@ -12,4 +13,5 @@ Benchmark_development.ipynb
 theory/
 examples/
 tmp.gif
-units.nb
+TODO.md
+compress.jl

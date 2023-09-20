@@ -285,7 +285,7 @@ if haskey(input, "Raman")
     for finalstate in input["Raman"]["finalstate"]
         local outname, CF
         outname = "resRaman_0$finalstate"
-        println("\t  Reading eigenstate with index $finalstate in `eigenstates.nc`.")
+        println("\t  Computing cross-correlation function with eigenstate #$finalstate.")
         CF = resRaman_corrF(finalstate, input)
         
         compute_spectrum(CF, input["params"]["stride"], input["params"]["dt"], input["params"]["Nsteps"];

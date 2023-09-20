@@ -84,7 +84,7 @@ function compute_energy(dynamics::Dynamics, metadata::MetaData)
         Venergy = abs(trapz((metadata.xdim, metadata.ydim), conj.(dynamics.wf) .* Vket))/wf_norm
         Tenergy = abs(trapz((metadata.xdim, metadata.ydim), conj.(dynamics.wf) .* Tket))/wf_norm
     end
-    return (Venergy + Tenergy, Venergy, Tenergy).*constants["Eh_to_wn"]
+    return (Venergy + Tenergy, Venergy, Tenergy)
 end
 
 function save_CF(outdata::OutData; filename::String="CF.txt")
