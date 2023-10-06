@@ -140,7 +140,7 @@ function print_output()
 \t              Analyzing and saving:
 \t====================================================#
 \t
-\t    |ψ(t,x,[y])|² saved in NetCDF format to `WF.nc` file.
+\t    ψ(t,x,[y]) saved in NetCDF format to `WF.nc` file.
 \t    Correlation function <ψ(0)|ψ(t)> saved in ASCII format to `CF.txt`.
 \t    Spectrum saved in ASCII format to `spectrum.txt`, computed as:
 \t       σ(ν) = ν/2/π ∫ <ψ(0)|ψ(t)> exp(i2πνt) dt 

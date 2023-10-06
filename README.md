@@ -88,7 +88,7 @@ interpolate.jl input.yml
 
 ---
 ### Running dynamics
-To run the exact quantum dynamics in a split-operator formalism, some essential parameters has to be provided in the YAML input file. A mininal working example of input file is showed bellow:
+To run the exact quantum dynamics using the split-operator formalism, some essential parameters has to be provided in the YAML input file. A mininal working example of input file is showed bellow:
 ```
 # Input file for Quantum Dynamics Engine
 # Number of dimensions:
@@ -128,7 +128,7 @@ The potential energy operator $\hat{\mathcal{V}}(x,y)$ has to be provided in the
 The form of the kinetic energy operator $\hat{\mathcal{T}}$ is restricted by the equation in the Hamiltonian section above. Only the mass of the fictitious particle needs to be specified through the keyword `mass`. In the case of the two-dimensional dynamics, the masses are provided as a list: $[\mu_x, \mu_y]$.
 
 #### Initial condition
-The script supports defining the initial condition as a real Gaussian wave packet, to achieve that the center and the width of the wave packet needs to be provided through `initpos` and `freq` keywords in the `initWF` block of the input file. The `initpos` expects value in Bohrs while `freq` a value in cm<sup>-1</sup>. For the two-dimensional dynamics, both variables need to be provided as lists. The Gaussian wave packet is then constructed according to:
+The script supports defining the initial condition as a real Gaussian wave packet, to achieve that the center ($x_0$) and the width of the wave packet ($\nu$) needs to be provided through `initpos` and `freq` keywords in the `initWF` block of the input file. The `initpos` expects value in Bohrs while `freq` a value in cm<sup>-1</sup>. For the two-dimensional dynamics, both variables need to be provided as lists. The Gaussian wave packet is then constructed according to:
 ```math
 \begin{equation}
 \psi_0(x) = \exp{ \left( -\nu\,\pi\,\mu \cdot (x-x_0)^2 \right) }
@@ -171,7 +171,7 @@ Here, $\mathrm{LS}(t)$ is a lineshape function. By default four different linesh
  1. No lineshape, equivalent to a rectangular window. 
  2. Hann window: $\mathrm{LS}(t)=1-\cos\left(\frac{2\pi t}{T}\right) \forall t \in (0,T); 0~elsewhere$ 
  3. Gaussian lineshape: $\mathrm{LS}(t)=\exp\left(-\frac{t^2}{0.6\cdot \mathrm{FWHM}}\right)$, the default value of FWHM is $250$ fs.
- 4. Kubo lineshape: $\mathrm{LS}(t)=\exp\left(\frac{\Delta^2}{\gamma^2}\cdot(\gamma\cdot t-1+e^{-\gamma\cdot t}) \right)$, the default values of the parameters are: $\gamma = 250$ fs<sup>-1</sup>, $\Delta = \frac{4}{7}\cdot250$ fs<sup>-1</sup>.
+ 4. Kubo lineshape: $\mathrm{LS}(t)=\exp\left(\frac{\Delta^2}{\gamma^2}\cdot(\gamma\cdot t-1+e^{-\gamma\cdot t}) \right)$, the default values of the parameters are: $\gamma = 1/250$ fs<sup>-1</sup>, $\Delta = \frac{7}{4}\cdot1/250$ fs<sup>-1</sup>.
 
 For a calculation of vibronic spectra the script `spectra.jl` can be used to change adjust the spectral range, parameters of the lineshape functions or adding a frequency shift to the Fourier transform.
 Following section can be then added to the input file:
@@ -184,7 +184,7 @@ spectrum:
     linewidth: 550      # FWHM for Gaussian lineshape, 3/2/Delta == 1/gamma for Kubo lineshape
     outname: "spectrum_550fs"
 ```
-The frequency shift is provided by `ZPE` keyword either as a number or as `read` which takes the ZPE from `initWF.nc` file genereted with imaginary time propagation. The frequency shift is then applied as:
+The frequency shift ($E_0$) is provided by `ZPE` keyword either as a number or as `read` keyword which takes the ZPE from `initWF.nc` file genereted by the imaginary time propagation. The frequency shift is then applied as:
 ```math
 \begin{equation}
 \sigma(\omega) = \frac{\omega}{2\pi} \int_0^{T} \langle \psi(0) | \psi(t) \rangle
@@ -193,15 +193,15 @@ The frequency shift is provided by `ZPE` keyword either as a number or as `read`
 ```
 ---
 ### Eigenstates
-The spectral method for calculating eigenstates is implemented in `eigenstates.jl` script. The eigenstate is obtained as a Fourier transform of a moving wave packet at a given energy, as shown in the equation bellow. It is thus necessary to know the eigenenergies in advance and provide them as input.
+The spectral method for calculating eigenstates is implemented in `eigenstates.jl` script. The eigenstate is obtained as a Fourier transform of a moving wave packet at a given energy, as shown in the equation bellow. It is thus necessary to know the energies of the stationary states in advance and provide them as input.
  
 ```math
 \begin{equation}
     \psi(x,y,E_i) = \frac{1}{T}\int\limits_0^T \psi(x,y,t) \cdot e^{ it\frac{E_i}{\hbar} } \mathrm{d}t
 \end{equation}
 ```
-The temporal evolution of the wavefunction $\psi(x,y,t)$ will be read from `WF.nc` file. Note that the final eigenstates will not be normalized (every state will have a different normalization).
-The user has to provide a list of energies (in cm<sup>-1</sup>) at which the eigenstates will be calculated, the following section has to appear in the input file:
+The temporal evolution of the wavefunction $\psi(x,y,t)$ will be read from `WF.nc` file.
+The user has to provide a list of energies in cm<sup>-1</sup> ($E_i$) at which the eigenstates will be calculated, the following section has to appear in the input file:
 ```
 # Compute eigenstates using a spectral method (read only by eigenstates.jl)
 eigstates:
@@ -232,7 +232,7 @@ Raman:
     linewidth: 250
     finalstate: 2 # index of the final eigenstate in `eigenstates.nc`
 ```
-The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
+The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state $\psi_f$ in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
 
 &nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*, **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
 
