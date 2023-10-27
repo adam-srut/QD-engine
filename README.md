@@ -72,7 +72,7 @@ The potential from *ab initio* calculations needs to be interpolated to achieve 
     -0.8881713     0.5205947
 ```
 The user thus has to provide a simple `.txt` file with two columns containing position and energy, both in atomic units. For two-dimensional potential, the file has to contain three columns, `X Y E`.
-Please note that only **regular grids** are supported, since the interpolation is done with cubic splines.
+Please note that only **regular grids** are supported, since the interpolation is done with **cubic splines**.
 
 To prepare the potential file, the user has to provide an input file with the following section:
 ```
@@ -162,7 +162,7 @@ The propagation is terminated after a convergence criterion is reached. The impl
 The energy spectrum is calculated after each run from the auto-correlation function according to:
 ```math
 \begin{equation}
-\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{T} \langle \psi(0) | \psi(t) \rangle
+\sigma(\omega) = \omega \int_0^{T} \langle \psi(0) | \psi(t) \rangle
     \cdot \mathrm{LS}(t)\,e^{i\omega t} \mathrm{d}t
 \end{equation}
 ```
@@ -187,7 +187,7 @@ spectrum:
 The frequency shift ($E_0$) is provided by `ZPE` keyword either as a number or as `read` keyword which takes the ZPE from `initWF.nc` file genereted by the imaginary time propagation. The frequency shift is then applied as:
 ```math
 \begin{equation}
-\sigma(\omega) = \frac{\omega}{2\pi} \int_0^{T} \langle \psi(0) | \psi(t) \rangle
+\sigma(\omega) = \omega \int_0^{T} \langle \psi(0) | \psi(t) \rangle
     \cdot \mathrm{LS}(t)\,e^{i(\omega + \frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
@@ -237,3 +237,22 @@ The structure of the input block is similar to the `spectrum` block described ab
 &nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*, **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
 
 ---
+### Beyond Condon approximation
+For calculation of the absorption spectrum and the resonance Raman absorption profile is possible to go beyond the Condon approximation by providing magnitudes of the transition dipole moment on a grid. The feature can be requested by adding the following to the input file:
+```
+# Beyond Condon approximation
+noncondon:
+    dip: "trdip.nc"
+```
+File `trdip.nc` is the grid representation of the transition dipole moment in the NetCDF format, this file is prepared in the same manner as the potentials by `interpolate.jl` described above.
+
+Spectrum is calculated according to:
+```math
+\begin{equation}
+\sigma(\omega) = \omega \int_0^{T} 
+\langle \psi(0) | 
+    \mu e^{-\frac{i}{\hbar}\hat{\mathcal{H}}t} \mu | \psi(0) \rangle
+    \cdot \mathrm{LS}(t)\,e^{i(\omega + \frac{E_0}{\hbar})t} \mathrm{d}t
+\end{equation}
+```
+Note that by adding keyword `noncondon` into the input file a quantity $e^{-\frac{i}{\hbar}\hat{\mathcal{H}}t} \mu \psi(0)$ will be saved in the `WF.nc` file.

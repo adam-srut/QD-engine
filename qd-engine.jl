@@ -184,6 +184,26 @@ function read_potential(filepath::String)
     end
 end
 
+function read_operator(filepath::String)
+    #= Read operator for spectra calculation without Condon approximation.
+        File is expected to have same formatting as potential.nc =#
+    NCDataset(filepath, "r") do file
+        if length(file.dim) == 1
+            xdim = file["xdim"][:]
+            operator = file["potential"][:]
+            return operator
+        elseif length(file.dim) == 2
+            xdim = file["xdim"][:]
+            ydim = file["ydim"][:]
+            operator = file["potential"][:,:]
+            return operator
+        else
+            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
+        end
+    end
+end
+
+
 function read_wf(filepath::String)
     #= Read relaxed wavefunction from NetCDF file =#
     NCDataset(filepath, "r") do wffile
@@ -421,6 +441,12 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
     print("\t  Progress:\n\t    0%")
     flush(stdout) 
 
+    # Non-Condon? => apply μ|ψ(0)>
+    if haskey(metadata.input, "noncondon")
+        mu = read_operator(metadata.input["noncondon"]["dip"])
+        dynamics.wf .= mu .* dynamics.wf
+    end
+
     # t=0
     wf0 = copy(dynamics.wf)
     T_halfstep!(dynamics) # Initialize
@@ -443,7 +469,15 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
         if mod(dynamics.istep, dynamics.step_stride) == 0
             end_step!(dynamics) # Complete integration
             irec = div(dynamics.istep, dynamics.step_stride)
-            overlap = dot(wf0, dynamics.wf)
+
+            # Compute autocorrelation function
+            if haskey(metadata.input, "noncondon")
+                # Non-Condon effects: <ψ(0) | μ exp(-i/ħĤt) μ | ψ(0)>
+                overlap = dot(wf0, mu .* dynamics.wf)
+            else
+                # Condon approximation: <ψ(0) | exp(-i/ħĤt) | ψ(0)>
+                overlap = dot(wf0, dynamics.wf)
+            end
             outdata.CF[irec] = overlap
             outdata.wf["CFRe"][irec] = real(overlap)
             outdata.wf["CFIm"][irec] = imag(overlap)

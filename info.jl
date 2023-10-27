@@ -71,7 +71,10 @@ function print_init(metadata::MetaData)
         println(@sprintf "\t %-20s%12.4f,%11.4f a.u." "Maximal momentum:" abs(1/2/metadata.xdim[2]-metadata.xdim[1]) abs(1/2/metadata.ydim[2]-metadata.ydim[1]) )
         println(@sprintf "\n\t%-22s%12s\n" "Potential taken from:" metadata.input["potential"] )
     end
-    
+    if haskey(metadata.input, "noncondon")
+        println("\tNon-Condon effects requested.\n\t  Transition dipole moment taken from file $(metadata.input["noncondon"]["dip"])")
+    end
+
     println("\n\t============> Warnings <============")
     println("\t Maximum bandwidth: Δt < π/3/ΔVₘₐₓ:")
     println(@sprintf "\t\t%6.2f <%6.2f" metadata.input["params"]["dt"] pi/3/(maximum(metadata.potential)-minimum(metadata.potential)))

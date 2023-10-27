@@ -35,6 +35,7 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     #= Compute spectrum from correlation function.
         Using various window or lineshape functions. =#
     timestep = dt*step_stride/41.341373335
+    totT = length(CF)*timestep
     T = length(CF)*(zff+1)
     dv = 1/(T*timestep*1e-15)
     wns = [ -zpe + i*dv/29979245800 for i in 0:T-1 ]
@@ -47,8 +48,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_hann = abs.(ifft(cf)).^2 : spectrum_hann = abs.(ifft(cf))
-    spectrum_hann = abs.(wns) .* spectrum_hann
-    spectrum_hann = spectrum_hann/maximum(spectrum_hann)
+    spectrum_hann = abs.(wns) .* spectrum_hann / totT
+    #spectrum_hann = spectrum_hann/maximum(spectrum_hann)
 
     # Add lineshape function (Gaussian): 
     cf = copy(CF)
@@ -59,8 +60,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Gauss = abs.(ifft(cf)).^2 : spectrum_Gauss = abs.(ifft(cf))
-    spectrum_Gauss = abs.(wns) .* spectrum_Gauss
-    spectrum_Gauss = spectrum_Gauss/maximum(spectrum_Gauss)
+    spectrum_Gauss = abs.(wns) .* spectrum_Gauss / totT
+    #spectrum_Gauss = spectrum_Gauss/maximum(spectrum_Gauss)
 
     # Add lineshape function (Kubo):
     cf = copy(CF)
@@ -72,8 +73,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = cf .- mean(cf)
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Kubo = abs.(ifft(cf)).^2 : spectrum_Kubo = abs.(ifft(cf)) 
-    spectrum_Kubo = abs.(wns) .* spectrum_Kubo
-    spectrum_Kubo = spectrum_Kubo/maximum(spectrum_Kubo)
+    spectrum_Kubo = abs.(wns) .* spectrum_Kubo / totT
+    #spectrum_Kubo = spectrum_Kubo/maximum(spectrum_Kubo)
 
     open("$outname.txt", "w") do file
         head = @sprintf "#%15s%16s%16s%16s\n" "wn. [cm⁻¹]" "Hann window." "Gauss LS" "Kubo LS"
@@ -116,6 +117,25 @@ function readCF_ASCII(input::Dict)
         end
     end
     return CF
+end
+
+function read_operator(filepath::String)
+    #= Read operator for spectra calculation without Condon approximation.
+        File is expected to have same formatting as potential.nc =#
+    NCDataset(filepath, "r") do file
+        if length(file.dim) == 1
+            xdim = file["xdim"][:]
+            operator = file["potential"][:]
+            return operator
+        elseif length(file.dim) == 2
+            xdim = file["xdim"][:]
+            ydim = file["ydim"][:]
+            operator = file["potential"][:,:]
+            return operator
+        else
+            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
+        end
+    end
 end
 
 function read_ZPE()
@@ -163,6 +183,10 @@ function resRaman_corrF(eigstate::Int, input::Dict)
             fstate = fstate / norm(fstate)
         end
     end
+    # Check for non-Condon
+    if haskey(input, "noncondon")
+        mu = read_operator(input["noncondon"]["dip"])
+    end
     # Read temporal evolution of the WP at the excited state surface:
     Nrec = Int(fld(input["params"]["Nsteps"], input["params"]["stride"]))
     CF = Array{ComplexF64}(undef, Nrec)
@@ -173,7 +197,11 @@ function resRaman_corrF(eigstate::Int, input::Dict)
             elseif input["dimensions"] == 2
                 wf = wffile["WFRe"][:, :, i] .+ 1im*wffile["WFIm"][:, :, i]
             end
-            overlap = dot(fstate, wf)
+            if haskey(input, "noncondon")
+                overlap = dot(fstate, mu .* wf)
+            else
+                overlap = dot(fstate, wf)
+            end
             CF[i] = overlap
         end
     end
@@ -231,7 +259,8 @@ input = YAML.load_file(infile)
 
 # Vibronic spectrum or energy levels:
 if haskey(input, "spectrum")
-    println("\n\t  Using autocorrelation function to compute spectrum.")
+    println("\n\t ========> Vibronic spectrum <=========")
+    println("\t  Using autocorrelation function to compute spectrum.")
     println("\t   --> Vibronic spectrum or energy levels.")
     if haskey(input["spectrum"], "outname")
         outname = input["spectrum"]["outname"]
@@ -271,7 +300,8 @@ end
 
 # Resonance Raman scattering cross section:
 if haskey(input, "Raman")
-    println("\n\t  Using cross-correlation function to compute spectrum.")
+    println("\n\t ========> Resonance Raman <=========")
+    println("\t  Using cross-correlation function to compute spectrum.")
     println("\t   --> Resonance Raman scattering cross section.")
     if input["Raman"]["ZPE"] == "read"
         zpe = read_ZPE()
@@ -284,7 +314,7 @@ if haskey(input, "Raman")
     
     for finalstate in input["Raman"]["finalstate"]
         local outname, CF
-        outname = "resRaman_0$finalstate"
+        outname = "resRaman_1$finalstate"
         println("\t  Computing cross-correlation function with eigenstate #$finalstate.")
         CF = resRaman_corrF(finalstate, input)
         
@@ -293,15 +323,16 @@ if haskey(input, "Raman")
                          zpe=zpe, lineshapeWidth=input["Raman"]["linewidth"],
                          outname=outname, powerspectrum=true) 
         write_GP(outname)
-        println("""\t  => Spectra saved to: $outname.txt; $outname.gp""")
+        println("\t  => Spectra saved to: $outname.txt; $outname.gp")
+        println("""\n
+\t  Heller method for frequency dependent polarizability:
+\t    see: Lee & Heller, J. Chem. Phys., 71(12), 1979, 4777–4788
+\t    α(i→ f) = ∫ <ψ_f | μ_S exp(-iĤ₂t/ħ) μ_I | ψ_i > dt """)
+
     end
 end
 
 ############################ Info:
-println("""\n
-\t  Heller method for frequency dependent polarizability:
-\t    see: Lee & Heller, J. Chem. Phys., 71(12), 1979, 4777–4788
-\t    α(i→ f) = ∫ <ψ_f | μ_S exp(-iĤ₂t/ħ) μ_I | ψ_i > dt """)
 
 fwhm = input["spectrum"]["linewidth"]
 println("\n\t  Lineshapes functions used to produce spectra:")
