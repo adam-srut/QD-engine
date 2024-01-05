@@ -49,7 +49,7 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_hann = abs.(ifft(cf)).^2 : spectrum_hann = abs.(ifft(cf))
     spectrum_hann = abs.(wns) .* spectrum_hann / totT
-    #spectrum_hann = spectrum_hann/maximum(spectrum_hann)
+    spectrum_hann = spectrum_hann/maximum(spectrum_hann)
 
     # Add lineshape function (Gaussian): 
     cf = copy(CF)
@@ -61,7 +61,7 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Gauss = abs.(ifft(cf)).^2 : spectrum_Gauss = abs.(ifft(cf))
     spectrum_Gauss = abs.(wns) .* spectrum_Gauss / totT
-    #spectrum_Gauss = spectrum_Gauss/maximum(spectrum_Gauss)
+    spectrum_Gauss = spectrum_Gauss/maximum(spectrum_Gauss)
 
     # Add lineshape function (Kubo):
     cf = copy(CF)
@@ -74,7 +74,7 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Kubo = abs.(ifft(cf)).^2 : spectrum_Kubo = abs.(ifft(cf)) 
     spectrum_Kubo = abs.(wns) .* spectrum_Kubo / totT
-    #spectrum_Kubo = spectrum_Kubo/maximum(spectrum_Kubo)
+    spectrum_Kubo = spectrum_Kubo/maximum(spectrum_Kubo)
 
     open("$outname.txt", "w") do file
         head = @sprintf "#%15s%16s%16s%16s\n" "wn. [cm⁻¹]" "Hann window." "Gauss LS" "Kubo LS"
