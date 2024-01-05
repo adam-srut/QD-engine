@@ -1,0 +1,12 @@
+# Input file for Quantum Dynamics Engine
+
+# Number of dimensions:
+dimensions : 1
+
+# Potential fitting (read only by interpolate.jl)
+potfit:
+    potfile: "Ex_pot.txt"
+    NPoints: 2048 
+    name: "Ex_pot.nc"
+
+

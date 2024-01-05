@@ -1,0 +1,44 @@
+# Input file for Quantum Dynamics Engine
+
+# Number of dimensions:
+dimensions : 1
+
+# File with a potential (expected in NetCDF format)
+potential : "GS_pot.nc"
+
+# Mass of the particle (in amu)
+mass : 14.006 
+
+
+# Dynamics parameters (in a.u.):
+params:
+  dt: 1.0 
+  Nsteps: 80000
+  stride: 10
+
+# Initial condition
+initWF:
+  initpos: -0.13    # Position of the Gaussian WP (x0)
+  freq: 1000       # frequency in cm^-1 
+
+# Imaginary time-propagation
+#imagT:
+#  gs_potential: "GS_pot.nc"
+
+# Potential fitting (read only by interpolate.jl)
+potfit:
+    potfile: "GS_pot.txt"
+    NPoints: 2048 
+    name: "GS_pot.nc"
+
+# Compute spectrum from correlation function (read only by spectra.jl)
+spectrum:
+    maxWn: 20000
+    minWn: 3000
+    ZPE: "read"         # read ZPE from `initWF.nc` file
+    linewidth: 450      # FWHM for Gaussian lineshape, 3/2/Delta == 1/gamma for Kubo lineshape
+    outname: "spectrum_450fs"
+
+# Compute eigenstates using a spectral method (read only by eigenstates.jl)
+eigstates:
+    energies: [500, 1500, 2500, 3500, 4500, 5500, 6500] 
