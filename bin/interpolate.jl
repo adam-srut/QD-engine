@@ -7,6 +7,8 @@ using ArgParse
 using Printf
 using Dates
 using Plots
+using FFTW
+using Statistics
 
 #=================================================
             Parse arguments
@@ -78,6 +80,97 @@ function read_potential2D(filepath::String)
         potential[x_i, y_i] = line[3]
     end
     return (potential, x_dim, y_dim)
+end
+
+function smoothing(pot::Array{Float64}, xdim::Array, ydim::Array, FWHM::Float64; padding::Bool=true)
+    #=
+    Smooth potential with a Gaussian kernel. (method for 2D potentials)
+    Function requiers the following args.:
+        pot - potential as 2D Array
+        xdim - 1D Array of spatial coordinates
+        ydim - 1D Array of spatial coordinates
+        FWHM - full width at half-maximum for a Gaussian kernel
+      Optional:
+        padding - Bool; if yes, use linear convolution; if no, use cyclic convolution
+      Return:
+        2D array with the size of `pot`
+    =#
+    # Define lengths, dx and dy:
+    Nx = length(xdim)
+    Ny = length(ydim)
+    dx = (xdim[end]-xdim[1])/(Nx-1)
+    dy = (ydim[end]-ydim[1])/(Ny-1)
+    # Define Gaussian kernel
+    kernel = Array{Float64}(undef, Nx, Ny)
+    for ix in 1:Nx
+        for iy in 1:Ny
+            x = dx*(ix-div(Nx,2))
+            y = dy*(iy-div(Ny,2))
+            kernel[ix,iy] = exp( -((x^2 + y^2)) / ((0.6*FWHM)^2) )
+        end
+    end
+    kernel = kernel/sum(kernel)
+    # Substract average from the potential to avoid zero frequency
+    absshift = mean(pot)
+    pot = pot .- absshift
+    # Linear convolution using FT (use zero-padding)
+    if padding
+        pad_kernel = [ kernel zeros(Nx,Ny-1); zeros(Nx-1,Ny*2-1) ]
+        pad_pot = [ pot zeros(Nx,Ny-1); zeros((Nx-1), Ny*2-1)]
+        (Nxpad, Nypad) = size(pad_pot)
+        conv = ifft( fft(pad_pot) .* fft(pad_kernel))
+        conv = real.(conv)
+        conv = conv .+ absshift
+        return conv[div(Nxpad,4):div(Nxpad,4)*3, div(Nypad,4):div(Nypad,4)*3]
+    # Cyclic convolution using FT (no padding)
+    else
+        conv = ifft( fft(pot) .* fft(kernel) )
+        conv = circshift(conv, (-div(Nx,2)+1, -div(Ny,2)+1))
+        conv = real.(conv)
+        conv = conv .+ absshift
+        return conv
+    end
+end
+
+function smoothing(pot::Array, xdim::Array{Float64}, FWHM::Float64; padding::Bool=true)
+    #=
+    Smooth potential with a Gaussian kernel. (method for 1D potentials)
+    Function requiers the following args.:
+        pot - potential as 1D Array
+        xdim - 1D Array of spatial coordinates
+        FWHM - full width at half-maximum for a Gaussian kernel
+      Optional:
+        padding - Bool; if yes, use linear convolution; if no, use cyclic convolution
+      Return:
+        1D array with the length of `pot`
+    =#
+    N = length(xdim)
+    dx = (xdim[end]-xdim[1])/(N-1)
+    # Define Gaussian kernel
+    kernel = [ exp( -(dx*(ix-div(N,2)))^2 / (0.6*FWHM)^2) for ix in 1:N ]
+    kernel = kernel/sum(kernel)
+    # Substract average from the potential to avoid zero frequencies
+    absshift = mean(pot)
+    pot = pot .- absshift
+    #return kernel
+    # Linear convolution using FT (use zero-padding)
+    if padding
+        pad_pot = [ pot ; zeros(N-1)]
+        pad_kernel = [ kernel ; zeros(N-1)]
+        Nn = length(pad_pot)
+        conv = ifft( fft(pad_pot) .* fft(pad_kernel) )
+        conv = real.(conv)
+        conv = conv .+ absshift
+        return conv[div(Nn,4):div(Nn,4)*3]
+    # Cyclic convolution using FT (no padding)
+    else
+        println("here")
+        conv = ifft( fft(pot) .* fft(kernel) )
+        conv = circshift(conv, -div(N,2)+1)
+        conv = real.(conv)
+        conv = conv .+ absshift
+        return conv
+    end
 end
 
 function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoints::Int;
@@ -175,15 +268,29 @@ if ! haskey(input, "potfit")
     throw(ArgumentError("potfit keyword not found in the input file!"))
 end
 
+if haskey(input["potfit"], "FWHM")
+    FWHM = input["potfit"]["FWHM"]
+else
+    throw(ArgumentError("FWHM keyword not found in `potfit` block!
+    Please provide the FWHM of Gaussian kernel used for smoothing the potentails (in Borhs).
+    Optimal value should be around step-size of the scan."))
+end
+
 if input["dimensions"] == 1
     (xdim, potential) = read_potential(input["potfit"]["potfile"])
+    potential = smoothing(potential, xdim, FWHM)
+
+########################## INFO
     println("""
 \t  1D dimensional potential
 \t  Potential taken from: $(input["potfit"]["potfile"])
 \t  range: [$(xdim[1]), $(xdim[end])]
+\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.
 \t  Number of points before interpolation: $(length(xdim))
 \t  Number of points after interpolation: $(input["potfit"]["NPoints"])
 """)
+##########################
+    
     if haskey(input["potfit"], "name")
         fit_potential1D(potential, xdim, input["potfit"]["NPoints"]; name=input["potfit"]["name"])
         println("\t  File $(input["potfit"]["name"]) created.")
@@ -193,14 +300,20 @@ if input["dimensions"] == 1
     end
 elseif input["dimensions"] == 2
     (potential, xdim, ydim) = read_potential2D(input["potfit"]["potfile"])
+    potential  = smoothing(potential, xdim, ydim, FWHM)
+
+##########################  INFO
     println("""
 \t  2D dimensional potential
 \t  Potential taken from: $(input["potfit"]["potfile"])
 \t  X-range: [$(xdim[1]), $(xdim[end])]
 \t  Y-range: [$(ydim[1]), $(ydim[end])]
+\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.
 \t  Number of points before interpolation: $(length(potential))
 \t  Number of points after interpolation: $(input["potfit"]["NPoints"][1]*input["potfit"]["NPoints"][2])
 """)
+##########################
+
     if haskey(input["potfit"], "name")
         fit_potential2D(potential, xdim, ydim, input["potfit"]["NPoints"][1], input["potfit"]["NPoints"][2]; name=input["potfit"]["name"])
         println("\t  File $(input["potfit"]["name"]) created.")
