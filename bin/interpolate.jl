@@ -47,6 +47,9 @@ function read_potential(filepath::String)
             append!(x_axis, line[1])
             append!(potential, line[2])
         end
+        perm = sortperm(x_axis)
+        potential = potential[perm]
+        x_axis = x_axis[perm]
         return (x_axis, potential)
     end
 end
