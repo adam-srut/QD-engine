@@ -50,6 +50,9 @@ function print_init(metadata::MetaData)
         println("\n\t========> 2-dimensional dynamics <======== ")
         println(@sprintf "\t Particle mass 1:%8.4f amu" metadata.input["mass"][1] )
         println(@sprintf "\t Particle mass 2:%8.4f amu" metadata.input["mass"][2] )
+        if haskey(metadata.input, "kcoup")
+            println(@sprintf "\t Kinetic coupling between the dimensions:%8.4f amu⁻¹." metadata.input["kcoup"])
+        end
         if haskey(metadata.input["initWF"], "fromfile")
             println("\t Reading ψ(0,x,y) from: $(metadata.input["initWF"]["fromfile"])")
         else

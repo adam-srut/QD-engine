@@ -220,7 +220,7 @@ function read_wf(filepath::String)
     end
 end
 
-function construct_kspace(;xdim, μx, ydim=false, μy=false)
+function construct_kspace(;xdim, μx, ydim=false, μy=false, kcoup::Float64=0.0)
     #= Construct inverse space for applying the kinetic energy operator =#
     Nx = length(xdim)
     Lx = xdim[end] - xdim[1]
@@ -230,7 +230,10 @@ function construct_kspace(;xdim, μx, ydim=false, μy=false)
         k_space = OffsetArray(Array{Float64}(undef, Nx, Ny), -div(Nx,2)-1, -div(Ny,2)-1)
         for x in -div(Nx,2):div(Nx,2)-1
             for y in -div(Ny,2):div(Ny,2)-1
+                # Diagonal term of the G-tensor
                 k_space[ x, y ] = (1/2/μx)*(2*pi/Lx*x)^2 + (1/2/μy)*(2*pi/Ly*y)^2
+                # mixed term:
+                k_space[ x, y ] += 1/2*kcoup * (2*pi)^2 * (1/Ly/Lx) * x*y
             end
         end
     else
@@ -239,7 +242,10 @@ function construct_kspace(;xdim, μx, ydim=false, μy=false)
             k_space[ x ] = (1/2/μx) * (2*pi/Lx*x)^2
         end
     end
-    return OffsetArrays.no_offset_view(k_space)
+    k_space = OffsetArrays.no_offset_view(k_space)
+    # Genereate the offset with fftshift:
+    k_space = fftshift(k_space)
+    return k_space
 end
 
 function propagate!(dynamics::Dynamics)
@@ -251,9 +257,7 @@ function propagate!(dynamics::Dynamics)
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
     wf .= dynamics.PFFT * wf
-    wf .= fftshift(wf)
     wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.k_space )
-    wf .= fftshift(wf)
     wf .= dynamics.PIFFT * wf
     dynamics.wf .= wf
     wf = nothing
@@ -265,9 +269,7 @@ function T_halfstep!(dynamics::Dynamics)
        of a free particle: exp(-i*Δt/2*T̂)ψ(t) =#
     wf = dynamics.wf
     wf .= dynamics.PFFT * wf
-    wf .= fftshift(wf)
     wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.k_space )
-    wf .= fftshift(wf)
     wf .= dynamics.PIFFT * wf
     dynamics.wf .= wf
     wf = nothing
@@ -280,9 +282,7 @@ function end_step!(dynamics::Dynamics)
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
     wf .= dynamics.PFFT * wf
-    wf .= fftshift(wf)
     wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.k_space )
-    wf .= fftshift(wf)
     wf .= dynamics.PIFFT * wf
     dynamics.wf .= wf
     wf = nothing
@@ -354,10 +354,10 @@ function imTime_propagation(dynamics::Dynamics)
         
         # Check convergence to the relaxed wave packet
         (enew, _, _) =  compute_energy(dynamics, metadata)
-        if abs(enew-eold) < 1e-10
+        if abs(enew-eold) < 1e-12
             break
-        elseif abs(enew-eold) < 1e-9 && !thresholds[3]
-            println("\t  => ΔE < 10⁻⁹ at $(dynamics.istep) steps")
+        elseif abs(enew-eold) < 1e-10 && !thresholds[3]
+            println("\t  => ΔE < 10⁻¹⁰ at $(dynamics.istep) steps")
             flush(stdout)
             thresholds[3] = true
         elseif abs(enew-eold) < 1e-8 && !thresholds[2]
@@ -376,7 +376,7 @@ function imTime_propagation(dynamics::Dynamics)
     dynamics.wf .= dynamics.wf / WFnorm
     
     println("\n\t  Converged in $(dynamics.istep) steps!!!")
-    println("\t    with threshold: ΔE(10Δτ) < 10⁻¹⁰ Eh")
+    println("\t    with threshold: ΔE(10Δτ) < 10⁻¹² Eh")
 
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
@@ -406,7 +406,6 @@ function imTime_propagation(dynamics::Dynamics)
             outfile["wfIm"][:] = imag.(dynamics.wf)
             outfile["xdim"][:] = metadata.xdim
         elseif metadata.input["dimensions"] == 2
-            outfile.attrib["title"] = "File contains inital WF from imaginary time propagation."
             (nx, ny) = size(dynamics.wf)
             defDim(outfile, "x", nx)
             defDim(outfile, "y", ny)
@@ -556,10 +555,12 @@ elseif metadata.input["dimensions"] == 2
                                μy=metadata.input["mass"][2]*constants["μ_to_me"])
     end
     # Prepare dynamics:
+    haskey(metadata.input, "kcoup") ? kcoup = metadata.input["kcoup"] : kcoup = 0.0
     k_space = construct_kspace(xdim=metadata.xdim, 
                                μx=metadata.input["mass"][1]*constants["μ_to_me"],
                                ydim=metadata.ydim,
-                               μy=metadata.input["mass"][2]*constants["μ_to_me"])
+                               μy=metadata.input["mass"][2]*constants["μ_to_me"],
+                               kcoup=kcoup/constants["μ_to_me"] )
     dynamics = Dynamics(potential=metadata.potential,
                         k_space=k_space,
                         wf=wf0,

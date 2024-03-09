@@ -79,6 +79,31 @@ function read_potential2D(filepath::String)
         y_i = round(Int, (y - y_dim[1])/dy) + 1
         potential[x_i, y_i] = line[3]
     end
+    # Check for missing values:
+    checkMat = fill(false, (N_x, N_y))
+    for line in pot
+        x = line[1]
+        x_i = round(Int, (x - x_dim[1])/dx) + 1
+        y = line[2]
+        y_i = round(Int, (y - y_dim[1])/dy) + 1
+        checkMat[x_i, y_i] = true
+    end
+    print_warn = false
+    open("missing_values.txt", "w") do file
+        for ix in 1:N_x
+            for iy in 1:N_y
+                if !checkMat[ix,iy]
+                    x = ((ix-1)*dx + x_dim[1])/1.889725
+                    y = ((iy-1)*dy + y_dim[1])/1.889725
+                    write(file, @sprintf "%12.4f%12.4f\n" x y)
+                    print_warn = true
+                end
+            end
+        end
+    end
+    if print_warn
+        @warn "There are missing values in the potential. Check `missing_values.txt`."
+    end
     return (potential, x_dim, y_dim)
 end
 
@@ -164,7 +189,6 @@ function smoothing(pot::Array, xdim::Array{Float64}, FWHM::Float64; padding::Boo
         return conv[div(Nn,4):div(Nn,4)*3]
     # Cyclic convolution using FT (no padding)
     else
-        println("here")
         conv = ifft( fft(pot) .* fft(kernel) )
         conv = circshift(conv, -div(N,2)+1)
         conv = real.(conv)
@@ -180,6 +204,8 @@ function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoint
     if ! ispow2(NPoints)
         @warn "Number of grid points is not a power of 2."
     end
+    # Set minimum of the potential to zero
+    potential = potential .- minimum(potential)
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     xrange = range(start=xdim[1], stop=xdim[end], length=NPoints)
@@ -208,6 +234,8 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
     if ! ispow2(NPointsX) || ! ispow2(NPointsY)
         @warn "Number of grid points is not a power of 2."
     end
+    # Set minimum of the potential to zero
+    potential = potential .- minimum(potential)
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     yrange_old = range(start=ydim[1], stop=ydim[end], length=length(ydim))
@@ -239,6 +267,7 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
             color=:lighttemperaturemap,
             fill=true,
             aspect_ratio=:equal,
+            levels=40,
             size=(600,600))
     savefig(outname * ".png")
 end
