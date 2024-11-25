@@ -357,6 +357,9 @@ function imTime_propagation(dynamics::Dynamics)
 
     # Setup imaginary time step
     dynamics.dt = -dynamics.dt*im # τ = -i*t
+    #   setup time-evolution operators:
+    dynamics.expV = exp.( -(im*dynamics.dt) * dynamics.potential)
+    dynamics.expT = exp.( -(im*dynamics.dt) * k_space)
     (eold, _, _) =  compute_energy(dynamics, metadata)
     
     thresholds = [false, false, false]
@@ -403,6 +406,9 @@ function imTime_propagation(dynamics::Dynamics)
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
+    #   renew time-evolution operators:
+    dynamics.expV = exp.( -(im*dynamics.dt) * dynamics.potential)
+    dynamics.expT = exp.( -(im*dynamics.dt) * k_space)
     
     (energy, Epot, Ekin) = compute_energy(dynamics, metadata) .* constants["Eh_to_wn"]
     println(@sprintf "\n\t  Energy of the WP:%10.2f cm^-1." energy)
