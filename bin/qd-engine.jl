@@ -8,7 +8,6 @@ using YAML
 using NCDatasets
 using Printf, Dates, ArgParse
 using SpecialPolynomials
-#using UnicodePlots
 using Trapz
 
 # Set number of threads for numerical routines:
@@ -43,7 +42,7 @@ constants = Dict(
     "c" => 29979245800,                 # Speed of light in cm/s
     "fs_to_au" => 41.341373335,
     "ang_to_bohr" => 1.889726125,
-    "μ_to_me" => 1822.88849,            # Atomic mass unit in masses of an electron
+    "μ_to_me" => 1822.88849,            # Atomic mass unit to atomic units
     "e" => 1.60218e-19,                 # e⁻ charge
     "h" => 6.62607e-34,                 # Planck constant
     "kB" => 3.16681e-6,                 # Boltzmann constant in a.u.
@@ -189,26 +188,6 @@ function read_potential(filepath::String)
     end
 end
 
-#function read_operator(filepath::String)
-#    #= Read operator for spectra calculation without Condon approximation.
-#        File is expected to have same formatting as potential.nc =#
-#    NCDataset(filepath, "r") do file
-#        if length(file.dim) == 1
-#            xdim = file["xdim"][:]
-#            operator = file["potential"][:]
-#            return operator
-#        elseif length(file.dim) == 2
-#            xdim = file["xdim"][:]
-#            ydim = file["ydim"][:]
-#            operator = file["potential"][:,:]
-#            return operator
-#        else
-#            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
-#        end
-#    end
-#end
-#
-
 function read_wf(filepath::String)
     #= Read relaxed wavefunction from NetCDF file =#
     NCDataset(filepath, "r") do wffile
@@ -298,7 +277,8 @@ function end_step!(dynamics::Dynamics)
 end
 
 function V_halfstep!(dynamics::Dynamics)
-    #= Half-step phase change: exp(-i*Δt/2*V̂)ψ(t) =#
+    #= Half-step phase change: exp(-i*Δt/2*V̂)ψ(t) 
+      OBSOLETE =#
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt/2) * dynamics.potential )
     dynamics.wf .= wf
@@ -376,7 +356,6 @@ function imTime_propagation(dynamics::Dynamics)
         dynamics.istep += 10
 
         # Renormalize:
-        #WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
         dynamics.wf .= dynamics.wf / norm(dynamics.wf)
         
         # Check convergence to the relaxed wave packet
@@ -399,7 +378,6 @@ function imTime_propagation(dynamics::Dynamics)
         eold = enew
     end
 
-    #WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
     dynamics.wf .= dynamics.wf / norm(dynamics.wf)
     
     println("\n\t  Converged in $(dynamics.istep) steps!!!")
@@ -470,65 +448,40 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
     print("\t  Progress:\n\t    0%")
     flush(stdout) 
 
-#    # Non-Condon? => apply μ|ψ(0)>
-#    if haskey(metadata.input, "noncondon")
-#        mu = read_operator(metadata.input["noncondon"]["dip"])
-#        dynamics.wf .= mu .* dynamics.wf
-#    end
-
     # t=0
     wf0 = copy(dynamics.wf)
-    T_halfstep!(dynamics) # Initialize
+    T_halfstep!(dynamics) # Initialize exp(-i*Δt/2*T̂)ψ(t)
     dynamics.istep += 1 # t0 + Δt/2
     
     # Propagation:
     while dynamics.istep < dynamics.Nsteps
 
         # Propagate
-        propagate!(dynamics)
-        dynamics.istep += 1 # exp(-i*Δt*T̂)*exp(-i*Δt*V̂)ψ(t)
+        propagate!(dynamics) # exp(-i*Δt*V̂)*exp(-i*Δt*T̂)ψ(t)
+        dynamics.istep += 1 
  
         # Update progress bar
         if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
             print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
             flush(stdout)
-            GC.gc() # Call garbage collector to suppress memory leak in saving the data
+            GC.gc() # Call garbage collector to suppress memory leak while saving the data
         end
        
-        # Compute CF and save PAmp:
+        # Compute CF and save PAmp at stride:
         if mod(dynamics.istep, dynamics.step_stride) == 0
-            end_step!(dynamics) # Complete integration
+            end_step!(dynamics) # Complete integration: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)
             irec = div(dynamics.istep, dynamics.step_stride) # calculate record index for outfile
 
             # Compute autocorrelation function
-#            if haskey(metadata.input, "noncondon")
-#                # Non-Condon effects: <ψ(0) | μ exp(-i/ħĤt) μ | ψ(0)>
-#                overlap = dot(wf0, mu .* dynamics.wf)
-#            else
-#                # Condon approximation: <ψ(0) | exp(-i/ħĤt) | ψ(0)>
-#                overlap = dot(wf0, dynamics.wf)
-#            end
             overlap = dot(wf0, dynamics.wf)           
             outdata.CF[irec] = overlap
             save_stride(dynamics, overlap, irec, outdata.wf)
-#            outdata.wf["CFRe"][irec] = real(overlap)
-#            outdata.wf["CFIm"][irec] = imag(overlap)
-#           
-#            # Save wave packet
-#            if metadata.input["dimensions"] == 1
-#                outdata.wf["WFRe"][:, irec] = real.(dynamics.wf)
-#                outdata.wf["WFIm"][:, irec] = imag.(dynamics.wf)
-#            elseif metadata.input["dimensions"] == 2
-#                outdata.wf["WFRe"][:, :, irec] = real.(dynamics.wf)
-#                outdata.wf["WFIm"][:, :, irec] = imag.(dynamics.wf)
-#                GC.gc() # call garbage collector
-#            end
 
-            T_halfstep!(dynamics) # Initialize new step
+            T_halfstep!(dynamics) # Initialize new step: exp(-i*Δt/2*T̂)ψ(t)
             dynamics.istep += 1
         end
     end
-    end_step!(dynamics) # Complete integration
+    end_step!(dynamics) # Complete integration: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)
     return outdata
 end
 
