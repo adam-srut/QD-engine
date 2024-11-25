@@ -7,12 +7,11 @@ using YAML
 using NCDatasets
 using Printf, Dates, ArgParse
 using SpecialPolynomials
-using UnicodePlots
+#using UnicodePlots
 using Trapz
 
-# Using more cores for FFTW or BLAS do not enhance performance!
-FFTW.set_num_threads(1)
-BLAS.set_num_threads(1)
+#FFTW.set_num_threads(2)
+#BLAS.set_num_threads(2)
 
 #=================================================
             Parse arguments
@@ -60,6 +59,8 @@ mutable struct Dynamics
     dt::Number                  # integration step in a.u.
     PFFT                        # planned forward FT
     PIFFT                       # planned inverse FT
+    expV::Array{ComplexF64}     # exponential of the potential energy
+    expT::Array{ComplexF64}     # exponential of the kinetic energy in k-space
     step_stride::Int            # stride for saving the results
     Nsteps::Int                 # Maximum number of steps
     istep::Int                  # Current step
@@ -71,13 +72,15 @@ function Dynamics(;
         k_space = Array{Float64},
         wf = Array{ComplexF64},
         dt = 1,
-        PFFT = plan_fft(wf),
-        PIFFT = plan_ifft(wf),
+        PFFT = plan_fft(rand(ComplexF64, size(wf)), flags=FFTW.MEASURE),
+        PIFFT = plan_ifft(rand(ComplexF64, size(wf)), flags=FFTW.MEASURE),
+        expV = exp.( -(im*dt) * potential),
+        expT = exp.( -(im*dt) * k_space),
         step_stride = 10,
         Nsteps = 10000,
         istep = 0
     )
-    return Dynamics(potential, k_space, wf, dt, PFFT, PIFFT, step_stride, Nsteps, istep)
+    return Dynamics(potential, k_space, wf, dt, PFFT, PIFFT, expV, expT, step_stride, Nsteps, istep)
 end
 
 #===================================================
@@ -184,25 +187,25 @@ function read_potential(filepath::String)
     end
 end
 
-function read_operator(filepath::String)
-    #= Read operator for spectra calculation without Condon approximation.
-        File is expected to have same formatting as potential.nc =#
-    NCDataset(filepath, "r") do file
-        if length(file.dim) == 1
-            xdim = file["xdim"][:]
-            operator = file["potential"][:]
-            return operator
-        elseif length(file.dim) == 2
-            xdim = file["xdim"][:]
-            ydim = file["ydim"][:]
-            operator = file["potential"][:,:]
-            return operator
-        else
-            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
-        end
-    end
-end
-
+#function read_operator(filepath::String)
+#    #= Read operator for spectra calculation without Condon approximation.
+#        File is expected to have same formatting as potential.nc =#
+#    NCDataset(filepath, "r") do file
+#        if length(file.dim) == 1
+#            xdim = file["xdim"][:]
+#            operator = file["potential"][:]
+#            return operator
+#        elseif length(file.dim) == 2
+#            xdim = file["xdim"][:]
+#            ydim = file["ydim"][:]
+#            operator = file["potential"][:,:]
+#            return operator
+#        else
+#            throw(DimensionMismatch("Wrong number of dimensions in the $filepath. Expected 1 or 2, got $(length(potfile.dim))."))
+#        end
+#    end
+#end
+#
 
 function read_wf(filepath::String)
     #= Read relaxed wavefunction from NetCDF file =#
@@ -224,6 +227,7 @@ function construct_kspace(;xdim, μx, ydim=false, μy=false, kcoup::Float64=0.0)
     #= Construct inverse space for applying the kinetic energy operator =#
     Nx = length(xdim)
     Lx = xdim[end] - xdim[1]
+    # 2D dynamics:
     if !(ydim isa Bool)
         Ny = length(ydim)
         Ly = ydim[end] - ydim[1]
@@ -236,6 +240,7 @@ function construct_kspace(;xdim, μx, ydim=false, μy=false, kcoup::Float64=0.0)
                 k_space[ x, y ] += 1/2*kcoup * (2*pi)^2 * (1/Ly/Lx) * x*y
             end
         end
+    # 1D dynamics:
     else
         k_space = OffsetArray(Array{Float64}(undef, Nx), -div(Nx,2)-1)
         for x in -div(Nx,2):div(Nx,2)-1
@@ -244,6 +249,7 @@ function construct_kspace(;xdim, μx, ydim=false, μy=false, kcoup::Float64=0.0)
     end
     k_space = OffsetArrays.no_offset_view(k_space)
     # Genereate the offset with fftshift:
+    #   now k_space can be directly multiplied with FT[|x>]
     k_space = fftshift(k_space)
     return k_space
 end
@@ -255,9 +261,9 @@ function propagate!(dynamics::Dynamics)
         Dynamics has to be initialized with: exp(-i*Δt/2*T̂)ψ(t)
                              and ended with: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)  =#
     wf = dynamics.wf
-    wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
+    wf .= wf .* dynamics.expV # expV == exp.( -(im*dt) * potential )
     wf .= dynamics.PFFT * wf
-    wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.k_space )
+    wf .= wf .* dynamics.expT # expT == exp.( -(im*dt) * k_space )
     wf .= dynamics.PIFFT * wf
     dynamics.wf .= wf
     wf = nothing
@@ -322,10 +328,26 @@ function create_harm_state_2D(;n::Int, xdim::Array{Float64}, ydim::Array{Float64
         exp( -(1/2*sqrt(μy*ky) * (y-y0)^2) )
     wf = vcat([ [chix(n, x)*chiy(n, y) for x in xdim] for y in ydim ]'...)
     wf = wf .+ 0*im
-    wf = wf / sqrt(dot(wf,wf))
+    wf = wf ./ sqrt(dot(wf,wf))
     return wf
 end
 
+function save_stride(dynamics::Dynamics, overlap::ComplexF64, irec::Int, outfile::NCDataset)
+    #= Wavefunction and corration functions are written for a given timestep
+        in an opened NetCDF file
+    =#
+    # Save correlation function
+    outfile["CFRe"][irec] = real(overlap)
+    outfile["CFIm"][irec] = imag(overlap)        
+    # Save wave packet
+    if metadata.input["dimensions"] == 1
+        outfile["WFRe"][:, irec] = real.(dynamics.wf)
+        outfile["WFIm"][:, irec] = imag.(dynamics.wf)
+    elseif metadata.input["dimensions"] == 2
+        outfile["WFRe"][:, :, irec] = real.(dynamics.wf)
+        outfile["WFIm"][:, :, irec] = imag.(dynamics.wf)
+    end
+end
 
 function imTime_propagation(dynamics::Dynamics)
     #= Function will propagate an arbitrary WF in imaginary time.
@@ -334,7 +356,7 @@ function imTime_propagation(dynamics::Dynamics)
          =#
 
     # Setup imaginary time step
-    dynamics.dt = -dynamics.dt*im
+    dynamics.dt = -dynamics.dt*im # τ = -i*t
     (eold, _, _) =  compute_energy(dynamics, metadata)
     
     thresholds = [false, false, false]
@@ -349,34 +371,34 @@ function imTime_propagation(dynamics::Dynamics)
         dynamics.istep += 10
 
         # Renormalize:
-        WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
-        dynamics.wf .= dynamics.wf / WFnorm
+        #WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
+        dynamics.wf .= dynamics.wf / norm(dynamics.wf)
         
         # Check convergence to the relaxed wave packet
         (enew, _, _) =  compute_energy(dynamics, metadata)
-        if abs(enew-eold) < 1e-12
+        if abs(enew-eold) < 1e-10
             break
-        elseif abs(enew-eold) < 1e-10 && !thresholds[3]
-            println("\t  => ΔE < 10⁻¹⁰ at $(dynamics.istep) steps")
-            flush(stdout)
-            thresholds[3] = true
-        elseif abs(enew-eold) < 1e-8 && !thresholds[2]
+        elseif abs(enew-eold) < 1e-8 && !thresholds[3]
             println("\t  => ΔE < 10⁻⁸ at $(dynamics.istep) steps")
             flush(stdout)
+            thresholds[3] = true
+        elseif abs(enew-eold) < 1e-6 && !thresholds[2]
+            println("\t  => ΔE < 10⁻⁶ at $(dynamics.istep) steps")
+            flush(stdout)
             thresholds[2] = true
-        elseif abs(enew-eold) < 1e-7 && !thresholds[1]
-            println("\t  => ΔE < 10⁻⁷ at $(dynamics.istep) steps")
+        elseif abs(enew-eold) < 1e-5 && !thresholds[1]
+            println("\t  => ΔE < 10⁻⁵ at $(dynamics.istep) steps")
             flush(stdout)
             thresholds[1] = true
         end
         eold = enew
     end
 
-    WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
-    dynamics.wf .= dynamics.wf / WFnorm
+    #WFnorm = sqrt(dot(dynamics.wf, dynamics.wf))
+    dynamics.wf .= dynamics.wf / norm(dynamics.wf)
     
     println("\n\t  Converged in $(dynamics.istep) steps!!!")
-    println("\t    with threshold: ΔE(10Δτ) < 10⁻¹² Eh")
+    println("\t    with threshold: ΔE(10Δτ) < 10⁻¹⁰ Eh")
 
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
@@ -440,11 +462,11 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
     print("\t  Progress:\n\t    0%")
     flush(stdout) 
 
-    # Non-Condon? => apply μ|ψ(0)>
-    if haskey(metadata.input, "noncondon")
-        mu = read_operator(metadata.input["noncondon"]["dip"])
-        dynamics.wf .= mu .* dynamics.wf
-    end
+#    # Non-Condon? => apply μ|ψ(0)>
+#    if haskey(metadata.input, "noncondon")
+#        mu = read_operator(metadata.input["noncondon"]["dip"])
+#        dynamics.wf .= mu .* dynamics.wf
+#    end
 
     # t=0
     wf0 = copy(dynamics.wf)
@@ -462,34 +484,37 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
         if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
             print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
             flush(stdout)
+            GC.gc() # Call garbage collector to suppress memory leak in saving the data
         end
        
         # Compute CF and save PAmp:
         if mod(dynamics.istep, dynamics.step_stride) == 0
             end_step!(dynamics) # Complete integration
-            irec = div(dynamics.istep, dynamics.step_stride)
+            irec = div(dynamics.istep, dynamics.step_stride) # calculate record index for outfile
 
             # Compute autocorrelation function
-            if haskey(metadata.input, "noncondon")
-                # Non-Condon effects: <ψ(0) | μ exp(-i/ħĤt) μ | ψ(0)>
-                overlap = dot(wf0, mu .* dynamics.wf)
-            else
-                # Condon approximation: <ψ(0) | exp(-i/ħĤt) | ψ(0)>
-                overlap = dot(wf0, dynamics.wf)
-            end
+#            if haskey(metadata.input, "noncondon")
+#                # Non-Condon effects: <ψ(0) | μ exp(-i/ħĤt) μ | ψ(0)>
+#                overlap = dot(wf0, mu .* dynamics.wf)
+#            else
+#                # Condon approximation: <ψ(0) | exp(-i/ħĤt) | ψ(0)>
+#                overlap = dot(wf0, dynamics.wf)
+#            end
+            overlap = dot(wf0, dynamics.wf)           
             outdata.CF[irec] = overlap
-            outdata.wf["CFRe"][irec] = real(overlap)
-            outdata.wf["CFIm"][irec] = imag(overlap)
-           
-            # Save wave packet
-            if metadata.input["dimensions"] == 1
-                outdata.wf["WFRe"][:, irec] = real.(dynamics.wf)
-                outdata.wf["WFIm"][:, irec] = imag.(dynamics.wf)
-            elseif metadata.input["dimensions"] == 2
-                outdata.wf["WFRe"][:, :, irec] = real.(dynamics.wf)
-                outdata.wf["WFIm"][:, :, irec] = imag.(dynamics.wf)
-                GC.gc() # call garbage collector
-            end
+            save_stride(dynamics, overlap, irec, outdata.wf)
+#            outdata.wf["CFRe"][irec] = real(overlap)
+#            outdata.wf["CFIm"][irec] = imag(overlap)
+#           
+#            # Save wave packet
+#            if metadata.input["dimensions"] == 1
+#                outdata.wf["WFRe"][:, irec] = real.(dynamics.wf)
+#                outdata.wf["WFIm"][:, irec] = imag.(dynamics.wf)
+#            elseif metadata.input["dimensions"] == 2
+#                outdata.wf["WFRe"][:, :, irec] = real.(dynamics.wf)
+#                outdata.wf["WFIm"][:, :, irec] = imag.(dynamics.wf)
+#                GC.gc() # call garbage collector
+#            end
 
             T_halfstep!(dynamics) # Initialize new step
             dynamics.istep += 1
@@ -528,14 +553,17 @@ if metadata.input["dimensions"] == 1
                                 metadata.input["mass"]*constants["μ_to_me"])   
     end
     # Prepare dynamics:
+    #   construct Fourier space for kinetic energy operator
     k_space = construct_kspace(xdim=metadata.xdim, 
                                μx=metadata.input["mass"]*constants["μ_to_me"])
+    #   prepare dynamics struct
     dynamics = Dynamics(potential=metadata.potential, 
                         k_space=k_space, 
                         wf=wf0,
                         dt=metadata.input["params"]["dt"], 
                         step_stride=metadata.input["params"]["stride"], 
                         Nsteps=metadata.input["params"]["Nsteps"])
+    #   prepare output data
     outdata = init_OutData(metadata.input["params"]["stride"], 
                            metadata.input["params"]["Nsteps"], 
                            wf0, 
@@ -555,18 +583,22 @@ elseif metadata.input["dimensions"] == 2
                                μy=metadata.input["mass"][2]*constants["μ_to_me"])
     end
     # Prepare dynamics:
+    #   look for kinetic coupling, or set it to zero
     haskey(metadata.input, "kcoup") ? kcoup = metadata.input["kcoup"] : kcoup = 0.0
+    #   construct Fourier space for kinetic energy operator
     k_space = construct_kspace(xdim=metadata.xdim, 
                                μx=metadata.input["mass"][1]*constants["μ_to_me"],
                                ydim=metadata.ydim,
                                μy=metadata.input["mass"][2]*constants["μ_to_me"],
                                kcoup=kcoup/constants["μ_to_me"] )
+    #   prepare dynamics struct
     dynamics = Dynamics(potential=metadata.potential,
                         k_space=k_space,
                         wf=wf0,
                         dt=metadata.input["params"]["dt"],
                         step_stride=metadata.input["params"]["stride"],
                         Nsteps=metadata.input["params"]["Nsteps"])
+    #   prepare output data
     outdata = init_OutData(metadata.input["params"]["stride"],
                            metadata.input["params"]["Nsteps"],
                            wf0,

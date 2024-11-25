@@ -110,7 +110,7 @@ function read_potential2D(filepath::String)
     return (potential, x_dim, y_dim)
 end
 
-function smoothing(pot::Array{Float64}, xdim::Array, ydim::Array, FWHM::Float64; padding::Bool=true)
+function smoothing(pot::Array{Float64}, xdim::Array, ydim::Array, FWHM::Float64; padding::Bool=false)
     #=
     Smooth potential with a Gaussian kernel. (method for 2D potentials)
     Function requiers the following args.:
@@ -149,7 +149,7 @@ function smoothing(pot::Array{Float64}, xdim::Array, ydim::Array, FWHM::Float64;
         conv = ifft( fft(pad_pot) .* fft(pad_kernel))
         conv = real.(conv)
         conv = conv .+ absshift
-        return conv[div(Nxpad,4):div(Nxpad,4)*3, div(Nypad,4):div(Nypad,4)*3]
+        return conv[div(Nxpad,4):div(Nxpad,4)*3, div(Nypad,4):div(Nypad,4)*3+1]
     # Cyclic convolution using FT (no padding)
     else
         conv = ifft( fft(pot) .* fft(kernel) )
@@ -160,7 +160,7 @@ function smoothing(pot::Array{Float64}, xdim::Array, ydim::Array, FWHM::Float64;
     end
 end
 
-function smoothing(pot::Array, xdim::Array{Float64}, FWHM::Float64; padding::Bool=true)
+function smoothing(pot::Array, xdim::Array{Float64}, FWHM::Float64; padding::Bool=false)
     #=
     Smooth potential with a Gaussian kernel. (method for 1D potentials)
     Function requiers the following args.:

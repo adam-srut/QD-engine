@@ -69,12 +69,11 @@ function compute_energy(dynamics::Dynamics, metadata::MetaData)
     #= Evaluate < ψ | H | ψ > using the Direct Fourier method.
         Energy is returned in Hatrees and composed into kinetic
         and potential energy contributions in Eh. =#
-    Vket = dynamics.potential .* dynamics.wf
-    Tket = dynamics.PFFT * dynamics.wf
-    Tket = fftshift(Tket)
-    Tket = dynamics.k_space .* Tket 
-    Tket = fftshift(Tket)
-    Tket = dynamics.PIFFT * Tket
+    Vket = dynamics.potential .* dynamics.wf    # V | ψ >
+    Tket = dynamics.PFFT * dynamics.wf          # FT[| ψ >]
+    Tket = dynamics.k_space .* Tket             # T | k >
+    Tket = dynamics.PIFFT * Tket                # FT⁻¹[T | k >]
+    # Calculate energy expectation value using trapezoidal rule:
     if metadata.input["dimensions"] == 1
         wf_norm = abs(trapz(metadata.xdim, conj(dynamics.wf) .* dynamics.wf))
         Venergy = abs(trapz(metadata.xdim, conj(dynamics.wf) .* Vket))/wf_norm

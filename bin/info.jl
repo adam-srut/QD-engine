@@ -92,38 +92,38 @@ function print_init(metadata::MetaData)
 
     println("\n")
 
-    println("\t" * "*"^60)
-    println("\tInitial condition:\n")
-    if metadata.input["dimensions"] == 1
-        plt_min = Int(round(0.1*length(metadata.xdim)))
-        plt_max = Int(round(0.9*length(metadata.xdim)))
-        pot_max = max(metadata.potential[plt_min:plt_max]...)
-        pot_min = min(metadata.potential[plt_min:plt_max]...)
-        wf0 = abs.(dynamics.wf) .^ 2
-        wf_max = maximum(wf0)
-        initPlot = lineplot(metadata.xdim[plt_min:plt_max], metadata.potential[plt_min:plt_max],
-                           canvas=BrailleCanvas,
-                           border=:ascii, color=:white, name="potential",
-                           xlabel="Distance [Bohrs]", ylabel="Energy [Hartree]",
-                           height=10, grid=false, compact=true, blend=false)
-        wf_rescale = 0.5*(pot_max - pot_min)/wf_max
-        wf_to_plot = wf0 * wf_rescale .+ 1.1*pot_min
-        lineplot!(initPlot, metadata.xdim, wf_to_plot, color=:cyan, name="WF(t=0)")
-        println(initPlot)
-        println("\t" * "*"^60 * "\n\n")
-    elseif metadata.input["dimensions"] == 2
-        initPlot = contourplot(metadata.xdim, metadata.ydim, metadata.potential,
-                               canvas=BrailleCanvas,
-                               border=:ascii, colorbar=false,
-                               xlabel="X [Bohrs]", ylabel="Y [Bohrs]",
-                               height=10, width=20,
-                               grid=false, compact=true, blend=false)
-        contourplot!(initPlot, metadata.xdim, metadata.ydim, Float64.( conj.(dynamics.wf) .* dynamics.wf),
-                    colormap=:Greys_3)
-        println(initPlot)
-        println("\t" * "*"^60 * "\n\n")
-        flush(stdout)
-    end
+#    println("\t" * "*"^60)
+#    println("\tInitial condition:\n")
+#    if metadata.input["dimensions"] == 1
+#        plt_min = Int(round(0.1*length(metadata.xdim)))
+#        plt_max = Int(round(0.9*length(metadata.xdim)))
+#        pot_max = max(metadata.potential[plt_min:plt_max]...)
+#        pot_min = min(metadata.potential[plt_min:plt_max]...)
+#        wf0 = abs.(dynamics.wf) .^ 2
+#        wf_max = maximum(wf0)
+#        initPlot = lineplot(metadata.xdim[plt_min:plt_max], metadata.potential[plt_min:plt_max],
+#                           canvas=BrailleCanvas,
+#                           border=:ascii, color=:white, name="potential",
+#                           xlabel="Distance [Bohrs]", ylabel="Energy [Hartree]",
+#                           height=10, grid=false, compact=true, blend=false)
+#        wf_rescale = 0.5*(pot_max - pot_min)/wf_max
+#        wf_to_plot = wf0 * wf_rescale .+ 1.1*pot_min
+#        lineplot!(initPlot, metadata.xdim, wf_to_plot, color=:cyan, name="WF(t=0)")
+#        println(initPlot)
+#        println("\t" * "*"^60 * "\n\n")
+#    elseif metadata.input["dimensions"] == 2
+#        initPlot = contourplot(metadata.xdim, metadata.ydim, metadata.potential,
+#                               canvas=BrailleCanvas,
+#                               border=:ascii, colorbar=false,
+#                               xlabel="X [Bohrs]", ylabel="Y [Bohrs]",
+#                               height=10, width=20,
+#                               grid=false, compact=true, blend=false)
+#        contourplot!(initPlot, metadata.xdim, metadata.ydim, Float64.( conj.(dynamics.wf) .* dynamics.wf),
+#                    colormap=:Greys_3)
+#        println(initPlot)
+#        println("\t" * "*"^60 * "\n\n")
+#        flush(stdout)
+#    end
 end
 
 
