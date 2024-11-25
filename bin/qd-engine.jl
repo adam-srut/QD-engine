@@ -1,5 +1,6 @@
 #! /usr/bin/env julia 
 
+# Load necessary packages:
 using LinearAlgebra, FFTW
 using OffsetArrays
 using Statistics
@@ -10,8 +11,9 @@ using SpecialPolynomials
 #using UnicodePlots
 using Trapz
 
-#FFTW.set_num_threads(2)
-#BLAS.set_num_threads(2)
+# Set number of threads for numerical routines:
+FFTW.set_num_threads(Threads.nthreads())
+BLAS.set_num_threads(1) # Using more cores for BLAS do not enhance performance
 
 #=================================================
             Parse arguments
