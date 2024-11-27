@@ -358,7 +358,7 @@ function imTime_propagation(dynamics::Dynamics)
         # Renormalize:
         dynamics.wf .= dynamics.wf / norm(dynamics.wf)
         
-        # Check convergence to the relaxed wave packet
+        # Check convergence to the relaxed wave packet:
         (enew, _, _) =  compute_energy(dynamics, metadata)
         if abs(enew-eold) < 1e-10
             break
@@ -392,6 +392,7 @@ function imTime_propagation(dynamics::Dynamics)
     
     (energy, Epot, Ekin) = compute_energy(dynamics, metadata) .* constants["Eh_to_wn"]
     println(@sprintf "\n\t  Energy of the WP:%10.2f cm^-1." energy)
+    energy = Int(round(energy))
 
     # Save the initial condition:
     isfile("initWF.nc") && rm("initWF.nc")
@@ -453,6 +454,9 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
     T_halfstep!(dynamics) # Initialize exp(-i*Δt/2*T̂)ψ(t)
     dynamics.istep += 1 # t0 + Δt/2
     
+    # progess bar init
+    prog_array_old = dynamics.istep .< range(start=1, stop=dynamics.Nsteps, length=11)
+
     # Propagation:
     while dynamics.istep < dynamics.Nsteps
 
@@ -461,7 +465,9 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
         dynamics.istep += 1 
  
         # Update progress bar
-        if dynamics.istep in round.(Int, range(start=1, stop=dynamics.Nsteps, length=10))
+        prog_array = dynamics.istep .< range(start=1, stop=dynamics.Nsteps, length=11)
+        if prog_array != prog_array_old
+            prog_array_old .= prog_array
             print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
             flush(stdout)
             GC.gc() # Call garbage collector to suppress memory leak while saving the data

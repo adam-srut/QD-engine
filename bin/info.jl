@@ -90,7 +90,7 @@ function print_init(metadata::MetaData)
         println("\t Imaginary time propagation requested.\n\t Reference and actual potential need to have the same spatial grid")
     end
 
-    println("\n\t*==> Utilizing $(Threads.nthreads()) CPUs <==*")
+    println("\n\t*==> Utilizing $(Threads.nthreads()) CPUs <==*\n")
 
 #    println("\t" * "*"^60)
 #    println("\tInitial condition:\n")
