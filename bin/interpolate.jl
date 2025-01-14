@@ -207,8 +207,6 @@ function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoint
     if ! ispow2(NPoints)
         @warn "Number of grid points is not a power of 2."
     end
-    # Set minimum of the potential to zero
-    potential = potential .- minimum(potential)
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     xrange = range(start=xdim[1], stop=xdim[end], length=NPoints)
@@ -237,8 +235,6 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
     if ! ispow2(NPointsX) || ! ispow2(NPointsY)
         @warn "Number of grid points is not a power of 2."
     end
-    # Set minimum of the potential to zero
-    potential = potential .- minimum(potential)
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     yrange_old = range(start=ydim[1], stop=ydim[end], length=length(ydim))
