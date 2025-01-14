@@ -1,5 +1,25 @@
 #! /usr/bin/env julia 
 
+#==================================================
+**************************************************
+**** Program for exact quantum dynamics       ****
+****   in precomputed one- or two-dimensional ****
+****   potentials.                            ****
+**************************************************
+**** Created at TU Darmstadt in Krewald Group.****
+**************************************************
+**** Author: Adam Šrut                        ****
+**************************************************
+**************************************************
+**** This is the main script of the package,  ****
+****   Reads `input.yml`                      ****
+****   Calculates evolution of the            ****
+****   wavepacket Ψ(x,y,t) and the            ****
+****   correlation function.                  ****
+****   Outputs to `WF.nc`                     ****
+**************************************************
+==================================================#
+
 # Load necessary packages:
 using LinearAlgebra, FFTW
 using OffsetArrays
@@ -22,7 +42,7 @@ function parse_commandline()
     s = ArgParseSettings()
     @add_arg_table s begin
         "input"
-            help="YAMl input file"
+            help="YAML input file"
             arg_type=String
             required=true
     end
@@ -242,10 +262,10 @@ function propagate!(dynamics::Dynamics)
         Dynamics has to be initialized with: exp(-i*Δt/2*T̂)ψ(t)
                              and ended with: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)  =#
     wf = dynamics.wf
-    wf .= wf .* dynamics.expV # expV == exp.( -(im*dt) * potential )
-    wf .= dynamics.PFFT * wf
-    wf .= wf .* dynamics.expT # expT == exp.( -(im*dt) * k_space )
-    wf .= dynamics.PIFFT * wf
+    wf .= wf .* dynamics.expV   # expV == exp.( -(im*dt) * potential )
+    wf .= dynamics.PFFT * wf    # forward FT
+    wf .= wf .* dynamics.expT   # expT == exp.( -(im*dt) * k_space )
+    wf .= dynamics.PIFFT * wf   # inverse FT
     dynamics.wf .= wf
     wf = nothing
     return dynamics
@@ -294,7 +314,8 @@ function create_harm_state(n::Int, x_space::Array{Float64}, x0::Number,
         basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * 
         exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
     wf = [ chi(n, i) for i in x_space ]
-    wf = wf / sqrt(dot(wf, wf)) .+ 0*im
+    wf = wf .+ 0*im
+    wf = wf / norm(wf) 
     return wf
 end
 
@@ -310,7 +331,7 @@ function create_harm_state_2D(;n::Int, xdim::Array{Float64}, ydim::Array{Float64
         exp( -(1/2*sqrt(μy*ky) * (y-y0)^2) )
     wf = vcat([ [chix(n, x)*chiy(n, y) for x in xdim] for y in ydim ]'...)
     wf = wf .+ 0*im
-    wf = wf ./ sqrt(dot(wf,wf))
+    wf = wf ./ norm(wf)
     return wf
 end
 
@@ -386,8 +407,8 @@ function imTime_propagation(dynamics::Dynamics)
     # Renew the timestep and istep for futher propagation:
     dynamics.dt = Float64(dynamics.dt*im)
     dynamics.istep = 0
-    #   renew time-evolution operators:
-    dynamics.expV = exp.( -(im*dynamics.dt) * dynamics.potential)
+    #   renew time-evolution operator for kinetic energy:
+    #      potential energy has to be done later with the correct potential
     dynamics.expT = exp.( -(im*dynamics.dt) * k_space)
     
     (energy, Epot, Ekin) = compute_energy(dynamics, metadata) .* constants["Eh_to_wn"]
@@ -463,16 +484,7 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
         # Propagate
         propagate!(dynamics) # exp(-i*Δt*V̂)*exp(-i*Δt*T̂)ψ(t)
         dynamics.istep += 1 
- 
-        # Update progress bar
-        prog_array = dynamics.istep .< range(start=1, stop=dynamics.Nsteps, length=11)
-        if prog_array != prog_array_old
-            prog_array_old .= prog_array
-            print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
-            flush(stdout)
-            GC.gc() # Call garbage collector to suppress memory leak while saving the data
-        end
-       
+      
         # Compute CF and save PAmp at stride:
         if mod(dynamics.istep, dynamics.step_stride) == 0
             end_step!(dynamics) # Complete integration: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)
@@ -485,6 +497,15 @@ function execute_dynamics(dynamics::Dynamics, outdata::OutData)
 
             T_halfstep!(dynamics) # Initialize new step: exp(-i*Δt/2*T̂)ψ(t)
             dynamics.istep += 1
+        end
+
+        # Update progress bar
+        prog_array = dynamics.istep .< range(start=1, stop=dynamics.Nsteps, length=11)
+        if prog_array != prog_array_old
+            prog_array_old .= prog_array
+            print( @sprintf "%2d%%" 100*dynamics.istep/dynamics.Nsteps )
+            flush(stdout)
+            GC.gc() # Call garbage collector to suppress memory leak while saving the data
         end
     end
     end_step!(dynamics) # Complete integration: exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t)
@@ -585,9 +606,14 @@ if haskey(metadata.input, "imagT")
     println("\t========> Imaginary time propagation <=========")
     println("\n\t  Potential taken from: `$(metadata.input["imagT"]["gs_potential"])`")
     flush(stdout)
+    # Assign the ground state potential to the dynamics
     dynamics.potential = metadata.ref_potential
+    # Perorm imaginary time propagation
     dynamics = imTime_propagation(dynamics)
+    # Re-assign the potential to the dynamics
     dynamics.potential = metadata.potential
+    # Adjust potential part of the time-evolution operator
+    dynamics.expV = exp.( -(im*dynamics.dt) * dynamics.potential)
 end
 
 
