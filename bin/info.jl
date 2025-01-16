@@ -33,9 +33,15 @@ function print_init(metadata::MetaData)
         else
             println("\t Using Gaussian WP at t=0:")
             println(@sprintf "\t\t%-20s%12.3f Bohrs" "centered at:" metadata.input["initWF"]["initpos"] )
-            println(@sprintf "\t\t%-20s%12.3f cm⁻¹" "harm. freq.:" metadata.input["initWF"]["freq"] )
-            fwhm = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"]*constants["μ_to_me"])
-            println(@sprintf "\t\t%-20s%12.3f Bohrs\n" "FWHM:" fwhm )
+            if haskey(metadata.input["initWF"],"FWHM") && ! haskey(metadata.input["initWF"],"freq")
+                freq = 4*log(2)/pi/(metadata.input["mass"]*constants["μ_to_me"])/(metadata.input["initWF"]["FWHM"]^2)/constants["wn_to_auFreq"]
+                println(@sprintf "\t\t%-20s%12.3f Bohrs" "FWHM:" metadata.input["initWF"]["FWHM"])
+                println(@sprintf "\t\t%-20s%12.3f cm⁻¹\n" "harm. freq.:" freq )
+            else
+                fwhm = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"]*constants["μ_to_me"])
+                println(@sprintf "\t\t%-20s%12.3f Bohrs" "FWHM:" fwhm )
+                println(@sprintf "\t\t%-20s%12.3f cm⁻¹\n" "harm. freq.:" metadata.input["initWF"]["freq"] )
+            end
         end
         println(@sprintf "\t %-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
         println(@sprintf "\t %-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )
@@ -58,10 +64,17 @@ function print_init(metadata::MetaData)
         else
             println("\t Using Gaussian WP at t=0:")
             println(@sprintf "\t\t%-20s%12.3f,%11.3f Bohrs" "centered at:" metadata.input["initWF"]["initpos"]... )
-            println(@sprintf "\t\t%-20s%12.3f,%11.3f cm⁻¹" "harm. freq.:" metadata.input["initWF"]["freq"]... )
-            fwhm1 = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"][1]*constants["μ_to_me"])
-            fwhm2 = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"][2]*constants["μ_to_me"])
-            println(@sprintf "\t\t%-20s%12.3f,%11.3f Bohrs\n" "FWHM:" fwhm1 fwhm2 )
+            if haskey(metadata.input["initWF"],"FWHM") && ! haskey(metadata.input["initWF"],"freq")
+                println(@sprintf "\t\t%-20s%12.3f,%11.3f Bohrs" "FWHM:" metadata.input["initWF"]["FWHM"]... )
+                freq1 = 4*log(2)/pi/(metadata.input["mass"][1]*constants["μ_to_me"])/(metadata.input["initWF"]["FWHM"][1]^2)/constants["wn_to_auFreq"]
+                freq2 = 4*log(2)/pi/(metadata.input["mass"][2]*constants["μ_to_me"])/(metadata.input["initWF"]["FWHM"][2]^2)/constants["wn_to_auFreq"]
+                println(@sprintf "\t\t%-20s%12.3f,%11.3f cm⁻¹\n" "harm. freq.:" freq1 freq2 )
+            elseif ! haskey(metadata.input["initWF"],"FWHM") && haskey(metadata.input["initWF"],"freq")
+                fwhm1 = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"][1]*constants["μ_to_me"])
+                fwhm2 = 2*sqrt(2*log(2))/((metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"]*2*pi) * metadata.input["mass"][2]*constants["μ_to_me"])
+                println(@sprintf "\t\t%-20s%12.3f,%11.3f Bohrs" "FWHM:" fwhm1 fwhm2 )
+                println(@sprintf "\t\t%-20s%12.3f,%11.3f cm⁻¹\n" "harm. freq.:" metadata.input["initWF"]["freq"]... )
+            end
         end
         println(@sprintf "\t %-20s%12.2f a.u." "Timestep:" metadata.input["params"]["dt"] )
         println(@sprintf "\t %-20s%12.f a.u." "tₘₐₓ:" metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"] )

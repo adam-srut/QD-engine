@@ -535,10 +535,22 @@ if metadata.input["dimensions"] == 1
     if haskey(metadata.input["initWF"], "fromfile")
         wf0 = read_wf(metadata.input["initWF"]["fromfile"])
     else
-        wf0 = create_harm_state(0, metadata.xdim, 
-                                metadata.input["initWF"]["initpos"], 
-                                metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"], 
-                                metadata.input["mass"]*constants["μ_to_me"])   
+        # Read FWHM from initWF block
+        if haskey(metadata.input["initWF"],"FWHM") && ! haskey(metadata.input["initWF"],"freq")
+            freq = 4*log(2)/pi/(metadata.input["initWF"]["FWHM"]^2)/(metadata.input["mass"]*constants["μ_to_me"])
+            wf0 = create_harm_state(0, metadata.xdim, 
+                                    metadata.input["initWF"]["initpos"], 
+                                    freq, 
+                                    metadata.input["mass"]*constants["μ_to_me"])
+        # Read frequency from initWF block
+        elseif ! haskey(metadata.input["initWF"],"FWHM") && haskey(metadata.input["initWF"],"freq")
+            wf0 = create_harm_state(0, metadata.xdim,
+                                      metadata.input["initWF"]["initpos"],
+                                      metadata.input["initWF"]["freq"]*constants["wn_to_auFreq"],
+                                      metadata.input["mass"]*constants["μ_to_me"])
+        else
+            throw(error("Please specify the width of the initial WP!\n\tKeyword `freq` or `FWHM` is missing in `initWF` block.\n"))
+        end
     end
     # Prepare dynamics:
     #   construct Fourier space for kinetic energy operator
@@ -562,13 +574,28 @@ elseif metadata.input["dimensions"] == 2
     if haskey(metadata.input["initWF"], "fromfile")
         wf0 = read_wf(metadata.input["initWF"]["fromfile"])
     else
-        wf0 = create_harm_state_2D(n=0, xdim=metadata.xdim, ydim=metadata.ydim,
-                               x0=metadata.input["initWF"]["initpos"][1],
-                               y0=metadata.input["initWF"]["initpos"][2],
-                               ωx=metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"],
-                               μx=metadata.input["mass"][1]*constants["μ_to_me"],
-                               ωy=metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"],
-                               μy=metadata.input["mass"][2]*constants["μ_to_me"])
+        # Read FWHM from initWF block
+        if haskey(metadata.input["initWF"],"FWHM") && ! haskey(metadata.input["initWF"],"freq")
+            freq1 = 4*log(2)/pi/(metadata.input["initWF"]["FWHM"][1]^2)/(metadata.input["mass"][1]*constants["μ_to_me"])
+            freq2 = 4*log(2)/pi/(metadata.input["initWF"]["FWHM"][2]^2)/(metadata.input["mass"][2]*constants["μ_to_me"])
+            wf0 = create_harm_state_2D(n=0, xdim=metadata.xdim, ydim=metadata.ydim,
+                                   x0=metadata.input["initWF"]["initpos"][1],
+                                   y0=metadata.input["initWF"]["initpos"][2],
+                                   ωx=freq1,
+                                   μx=metadata.input["mass"][1]*constants["μ_to_me"],
+                                   ωy=freq2,
+                                   μy=metadata.input["mass"][2]*constants["μ_to_me"])
+        elseif ! haskey(metadata.input["initWF"],"FWHM") && haskey(metadata.input["initWF"],"freq")
+            wf0 = create_harm_state_2D(n=0, xdim=metadata.xdim, ydim=metadata.ydim,
+                                   x0=metadata.input["initWF"]["initpos"][1],
+                                   y0=metadata.input["initWF"]["initpos"][2],
+                                   ωx=metadata.input["initWF"]["freq"][1]*constants["wn_to_auFreq"],
+                                   μx=metadata.input["mass"][1]*constants["μ_to_me"],
+                                   ωy=metadata.input["initWF"]["freq"][2]*constants["wn_to_auFreq"],
+                                   μy=metadata.input["mass"][2]*constants["μ_to_me"])
+        else
+            throw(error("Please specify the width of the initial WP!\n\tKeyword `freq` or `FWHM` is missing in `initWF` block.\n"))
+        end
     end
     # Prepare dynamics:
     #   look for kinetic coupling, or set it to zero
