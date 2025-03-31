@@ -35,8 +35,7 @@ FGH:
     method: "iterative"   # Method for matrix diagonalization (see below)
     # advanced:                  # Advanced options 
     #     precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
-    #     sparse: true           # Use sparse matrix representation
-    #     KrylovDim: 100         # Dimension of Krylov subspace
+    #     krylovdim: 100         # Dimension of Krylov subspace
     #     tol: 12                # Requested accuracy
     #     maxiter: 100           # Maximum number of iterations
     #     verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
@@ -55,9 +54,12 @@ using YAML
 using NCDatasets
 using Printf, Dates, ArgParse
 using Trapz
+using Base.Threads
 
 # Set number of threads for numerical routines:
-FFTW.set_num_threads(Threads.nthreads())
+#FFTW.set_num_threads(Threads.nthreads()) 
+# Keeps fft serial and parallelize outer loop for H constructions
+FFTW.set_num_threads(1)
 BLAS.set_num_threads(Threads.nthreads()) 
 
 #=================================================
@@ -200,7 +202,8 @@ function construct_T(k_space::Array{Float64})
     # Initialize the kinetic energy operator as Matrix{Complex{Float64}}
 	T = zeros(N,N) .+ im*zeros(N,N)
     # Construct the kinetic energy operator column by column:
-	for icol in 1:N
+    #   Use emabarassingly parallel approach with @threads
+	@threads for icol in 1:N
 		Tcol = construct_ith_column(k_space, icol)
 		T[:,icol] .= Tcol
 	end
@@ -295,35 +298,13 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
     end
 end
 
-# function estimate_memory(H::Matrix; method::Symbol=:exact, precision::Symbol=:double)
-#     N = size(H, 1)  # Number of basis functions
-#     # Estimate memory usage based on the method
-#     if method == :exact
-#         # Full diagonalization (eigen)
-#         alloc_mem = 3.05645e-5 * N^2 # in MB
-#     elseif method == :iterative
-#         # Iterative Krylov methods (Lanczos)
-#         # Assuming Krylov subspace size of 100:
-#         alloc_mem = 8.10274e-6 * N^2 # in MB
-#     else
-#         error("Unknown method. Use :full or :iterative")
-#     end
-#     if precision == :double
-#         return alloc_mem      
-#     elseif precision == :single
-#         return alloc_mem / 2
-#     else
-#         error("Unknown precision. Use :double or :single")
-#     end
+# function convert_to_sparse(H::Matrix; tol::Float64=1e-6)
+#     #= Convert the matrix to sparse format =#
+#     H = sparse(H)
+#     H.nzval[abs.(H.nzval) .< tol] .= 0.0
+#     dropzeros!(H)
+#     return H
 # end
-
-function convert_to_sparse(H::Matrix; tol::Float64=1e-6)
-    #= Convert the matrix to sparse format =#
-    H = sparse(H)
-    H.nzval[abs.(H.nzval) .< tol] .= 0.0
-    dropzeros!(H)
-    return H
-end
 
 function convert_to_single(H::Matrix)
     #= Convert the matrix to single precision =#
@@ -334,7 +315,6 @@ function prepare_inp_param(metadata::MetaData)
     #= Prepare input parameters for the FGH algorithm =#
     advancedParams = Dict(
             "precision" => "Double",  # Precision of the calculation
-            "sparse" => true,         # Use sparse matrix
             "tol" => 12,              # Tolerance for iterative methods
             "maxiter" => 100,         # Maximum number of iterations
             "krylovdim" => 100,       # Krylov subspace dimension
@@ -350,9 +330,9 @@ function prepare_inp_param(metadata::MetaData)
     # Merge advanced parameters with default parameters:
     metadata.input["FGH"]["advanced"] = advancedParams
     # Make sure that sparse matrix is not used for exact diagonalization:
-    if lowercase.(metadata.input["FGH"]["method"]) == "exact"
-        metadata.input["FGH"]["advanced"]["sparse"] = false
-    end
+    # if lowercase.(metadata.input["FGH"]["method"]) == "exact"
+    #     metadata.input["FGH"]["advanced"]["sparse"] = false
+    # end
     return metadata
 end
 
@@ -363,43 +343,38 @@ function execute_FGH(metadata::MetaData)
     resH = @timed construct_H(metadata.k_space, metadata.potential)
     H = resH.value
     # Print Hamiltonian info:
-    println("\t  Hamiltonian matrix size: $(size(H))")
-    println("\t  Time for construction: $(Int(round(resH.time))) seconds")
-    println("\t  Size in memory: $(round(size(H,1)^2*16 / 1024^3, digits=2)) GB")
+    println(@sprintf "\t  %-28s%8d" "Hamiltonian matrix size:" size(H,1))
+    println(@sprintf "\t  %-28s%8d s" "Time for construction:" resH.time)
+    println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
     #println("\t  Memory allocated: $(Int(round(resH.bytes / 1024^2))) MB")
     flush(stdout)
 
     # Call garbage collector:
     GC.gc()
-    # Estimate memory usage:
-    # mem = estimate_memory(Matrix(H), 
-    #     method=Symbol(lowercase.(metadata.input["FGH"]["method"])),
-    #     precision=Symbol(lowercase.(metadata.input["FGH"]["advanced"]["precision"]))
-    #     )
-    # println(@sprintf "\n\tEstimated memory usage: %.2f ± %.2f MB" mem 0.1*mem)
-    # println("\t  Estimate for dense Hermitian matrix with double precision.")
-    
+        
+    # USING SPARSE MATRICES DOES NOT HELP THE PERFORMACE!!! 
+    # Code below is thus commented out.
     # Convert to sparse matrix if requested:
-    if metadata.input["FGH"]["advanced"]["sparse"]
-        H = convert_to_sparse(Matrix(H))
-        println("\n\tConverting to sparse matrix...")
-        println("\t  Number of non-zero elements: $(nnz(H)); out of $(length(H))")
-    end
+    # if metadata.input["FGH"]["advanced"]["sparse"]
+    #     H = convert_to_sparse(Matrix(H))
+    #     println("\n\tConverting to sparse matrix...")
+    #     println("\t  Number of non-zero elements: $(nnz(H)); out of $(length(H))")
+    # end
     # Convert to single precision if requested:
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
         H = convert_to_single(Matrix(H))
         println("\n\tConverting to single precision...")
     end
     flush(stdout)
-
+    
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
     if lowercase.(metadata.input["FGH"]["method"]) == "exact"
-        println("\n\tExact diagonalization...")
+        println("\n\t**** Full Exact diagonalization ****\n")
         (vals, vecs) = exact_diagonalization(H, metadata.input["FGH"]["Nmax"])
     # Iterative diagonalization:
     elseif lowercase.(metadata.input["FGH"]["method"]) == "iterative"
-        println("\n\tIterative diagonalization...")
+        println("\n\t** Iterative diagonalization with Lanczos algorithm **\n")
         (vals, vecs) = Lanczos_algorithm(H, 
             metadata.input["FGH"]["Nmax"],
             tol=10.0^(-metadata.input["FGH"]["advanced"]["tol"]),
@@ -494,7 +469,7 @@ print_hello()
 
 metadata = MetaData(inputfile=infile)
 metadata = prepare_inp_param(metadata)
-println("\t========> FGH algorithm started! <=========\n")
+println("\t============> FGH algorithm started! <=============\n")
 flush(stdout)
 
 # Calculate eigenstates and eneregies employing the FGH method:
