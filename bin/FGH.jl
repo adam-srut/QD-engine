@@ -48,7 +48,7 @@ FGH:
 
 # Load necessary packages:
 using LinearAlgebra, FFTW, KrylovKit
-using OffsetArrays, SparseArrays
+using OffsetArrays
 using Statistics
 using YAML
 using NCDatasets
@@ -57,9 +57,10 @@ using Trapz
 using Base.Threads
 
 # Set number of threads for numerical routines:
-# Keep fft serial; parallelize outer loop for H construction: `construct_T` function
+# Keep FFTW serial; parallelize outer loop for H construction: `construct_T` function
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(Threads.nthreads()) 
+KrylovKit.set_num_threads(Threads.nthreads())
 
 #=================================================
             Parse arguments
@@ -188,6 +189,7 @@ function construct_ith_column(k_space::Array{Float64}, i::Int, pfft, pifft)
 	phi[i] = 1
 	# Calculate i-th column of the T operator:
 	Tx = pifft * (k_space .* (pfft * phi))
+    # Unwrap the results into a vector for 2D:
 	if ndims(Tx) == 2 
 		return vcat(Tx...)
 	elseif ndims(Tx) == 1
@@ -233,20 +235,19 @@ function exact_diagonalization(H::Union{Hermitian, Matrix}, nmax::Int)
     # Print runtime info:
     println("\n\t==========> Diagonalization finished! <==========")
     println("""\tExact diagonalization run overview:
-        \t  Time needed: $(round(result.time)) seconds
-        \t  Memory used: $(round(result.bytes / 1024^3, digits=2)) GB
+        \t  Time needed $(round(result.time)) seconds
+        \t  Memory used $(round(result.bytes / 1024^3, digits=2)) GB
     """)
 	return (F.values[1:nmax], F.vectors[:,1:nmax])
 end
 
-function Lanczos_algorithm(H::Union{Hermitian, Matrix, SparseMatrixCSC}, nmax::Int;
+function Lanczos_algorithm(H::Union{Hermitian, Matrix}, nmax::Int;
         tol::Float64=KrylovDefaults.tol, 
         maxiter::Int=KrylovDefaults.maxiter, 
         krylovdim::Int=100,
         verbosity::Int=1) 
     #= Iterative Lanczos algorithm for diagonalization of the Hamiltonian operator
         using KrylovKit package =#
-    (vals, vecs, info) = 
     result = @timed eigsolve(H,
         nmax,                   # calculate nmax eigenvalues
         :SR,                    # search for smallest eigenvalues
@@ -262,11 +263,11 @@ function Lanczos_algorithm(H::Union{Hermitian, Matrix, SparseMatrixCSC}, nmax::I
     # Print runtime info:
     println("\n\t==========> Diagonalization finished! <==========")
     println("\tLanczos algorithm run overview:")
-    println(@sprintf "\t  %-32s%10d" "Number of iterations:" info.numiter)
-    println(@sprintf "\t  %-32s%10d" "Number of converged eigenvalues:" info.converged)
-    println(@sprintf "\t  %-32s%10d" "Number of Krylov vectors:" krylovdim)
-    println(@sprintf "\t  %-32s%10d s" "Time needed:" result.time) 
-    println(@sprintf "\t  %-32s%10.2f GB" "Total memory allocated:" result.bytes / 1024^3) 
+    println(@sprintf "\t  %-32s%10d" "Number of iterations" info.numiter)
+    println(@sprintf "\t  %-32s%10d" "Number of converged eigenvalues" info.converged)
+    println(@sprintf "\t  %-32s%10d" "Number of Krylov vectors" krylovdim)
+    println(@sprintf "\t  %-32s%10d s" "Time needed" result.time) 
+    println(@sprintf "\t  %-32s%10.2f GB" "Total memory allocated" result.bytes / 1024^3) 
     # return the eigenvalues and eigenvectors:
     return (vals, vecs)
 end
@@ -302,15 +303,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
     end
 end
 
-# function convert_to_sparse(H::Matrix; tol::Float64=1e-6)
-#     #= Convert the matrix to sparse format =#
-#     H = sparse(H)
-#     H.nzval[abs.(H.nzval) .< tol] .= 0.0
-#     dropzeros!(H)
-#     return H
-# end
-
-function convert_to_single(H::Matrix)
+function convert_to_single(H::Union{Matrix,Hermitian})
     #= Convert the matrix to single precision =#
     return Hermitian(ComplexF32.(H))
 end
@@ -333,10 +326,6 @@ function prepare_inp_param(metadata::MetaData)
     end
     # Merge advanced parameters with default parameters:
     metadata.input["FGH"]["advanced"] = advancedParams
-    # Make sure that sparse matrix is not used for exact diagonalization:
-    # if lowercase.(metadata.input["FGH"]["method"]) == "exact"
-    #     metadata.input["FGH"]["advanced"]["sparse"] = false
-    # end
     return metadata
 end
 
@@ -356,17 +345,9 @@ function execute_FGH(metadata::MetaData)
     # Call garbage collector:
     GC.gc()
         
-    # USING SPARSE MATRICES DOES NOT HELP THE PERFORMACE!!! 
-    # Code below is thus commented out.
-    # Convert to sparse matrix if requested:
-    # if metadata.input["FGH"]["advanced"]["sparse"]
-    #     H = convert_to_sparse(Matrix(H))
-    #     println("\n\tConverting to sparse matrix...")
-    #     println("\t  Number of non-zero elements: $(nnz(H)); out of $(length(H))")
-    # end
     # Convert to single precision if requested:
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
-        H = convert_to_single(Matrix(H))
+        H = convert_to_single(H)
         println("\n\tConverting to single precision...")
     end
     flush(stdout)
@@ -387,7 +368,7 @@ function execute_FGH(metadata::MetaData)
             verbosity=metadata.input["FGH"]["advanced"]["verbosity"]
             )
     else
-        throw(ArgumentError("Unknown method. Use 'exact' or 'iterative'."))
+        throw(ArgumentError("Unknown method. Use 'Exact' or 'Iterative'."))
     end
     flush(stdout)  
 
@@ -468,6 +449,31 @@ function print_hello()
    flush(stdout)
 end
 
+function print_input(input::Dict)
+    # Print content of the input file:
+    println("\t===============> Input parameters <===============")
+    println(@sprintf "\t%-28s%10d" "Number of dimensions" input["dimensions"])
+    if input["dimensions"] == 1
+        println(@sprintf "\t%-28s%10.4f" "Mass" input["mass"])
+    elseif input["dimensions"] == 2
+        println(@sprintf "\t%-28s%10.4f" "Mass X" input["mass"][1])
+        println(@sprintf "\t%-28s%10.4f" "Mass Y" input["mass"][2])
+    end
+    println(@sprintf "\t%-28s%10s" "Potential file" input["potential"])
+    if haskey(input, "kcoup")
+        println(@sprintf "\t%-28s%10.2f" "Kinetic coupling" input["kcoup"])
+    end
+    println("\tFGH parameters:")
+    for (key, value) in input["FGH"]
+        if key != "advanced"
+            println(@sprintf "\t  %-26s%10s" key value)
+        else
+            for (key, value) in input["FGH"]["advanced"]
+                println(@sprintf "\t  %-26s%10s" key value)
+            end
+        end
+    end
+end
 
 #============================================
                 Main code
@@ -482,7 +488,8 @@ print_hello()
 # Parse input file and collect all input parameters into metadata object:
 metadata = MetaData(inputfile=infile)
 metadata = prepare_inp_param(metadata)
-println("\t============> FGH algorithm started! <=============\n")
+print_input(metadata.input)
+println("\n\t============> FGH algorithm started! <=============\n")
 flush(stdout)
 
 # Calculate eigenstates and eneregies employing the FGH method:
