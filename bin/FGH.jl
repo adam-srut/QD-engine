@@ -57,8 +57,7 @@ using Trapz
 using Base.Threads
 
 # Set number of threads for numerical routines:
-#FFTW.set_num_threads(Threads.nthreads()) 
-# Keeps fft serial and parallelize outer loop for H constructions
+# Keep fft serial; parallelize outer loop for H construction: `construct_T` function
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(Threads.nthreads()) 
 
@@ -181,12 +180,14 @@ function read_potential(filepath::String)
     end
 end
 
-function construct_ith_column(k_space::Array{Float64}, i::Int)
+function construct_ith_column(k_space::Array{Float64}, i::Int, pfft, pifft)
+    #= Construct the i-th column of the kinetic energy operator 
+        Requires planned FFT and IFFT. =#
 	# Prepare one-hot vector:
 	phi = zeros(size(k_space)...)
 	phi[i] = 1
 	# Calculate i-th column of the T operator:
-	Tx = ifft(k_space .* fft(phi))
+	Tx = pifft * (k_space .* (pfft * phi))
 	if ndims(Tx) == 2 
 		return vcat(Tx...)
 	elseif ndims(Tx) == 1
@@ -201,10 +202,13 @@ function construct_T(k_space::Array{Float64})
 	N = length(k_space)
     # Initialize the kinetic energy operator as Matrix{Complex{Float64}}
 	T = zeros(N,N) .+ im*zeros(N,N)
+    # Plan forward and inverse FFT:
+    pfft = plan_fft(k_space)
+    pifft = plan_ifft(k_space)
     # Construct the kinetic energy operator column by column:
     #   Use emabarassingly parallel approach with @threads
 	@threads for icol in 1:N
-		Tcol = construct_ith_column(k_space, icol)
+		Tcol = construct_ith_column(k_space, icol, pfft, pifft)
 		T[:,icol] .= Tcol
 	end
 	return T
@@ -343,7 +347,7 @@ function execute_FGH(metadata::MetaData)
     resH = @timed construct_H(metadata.k_space, metadata.potential)
     H = resH.value
     # Print Hamiltonian info:
-    println(@sprintf "\t  %-28s%8d" "Hamiltonian matrix size:" size(H,1))
+    println(@sprintf "\t  %-28s%8d × %d" "Hamiltonian matrix size:" size(H,1) size(H,2))
     println(@sprintf "\t  %-28s%8d s" "Time for construction:" resH.time)
     println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
     #println("\t  Memory allocated: $(Int(round(resH.bytes / 1024^2))) MB")
@@ -370,11 +374,11 @@ function execute_FGH(metadata::MetaData)
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
     if lowercase.(metadata.input["FGH"]["method"]) == "exact"
-        println("\n\t**** Full Exact diagonalization ****\n")
+        println("\n\t**** Full Exact diagonalization ****")
         (vals, vecs) = exact_diagonalization(H, metadata.input["FGH"]["Nmax"])
     # Iterative diagonalization:
     elseif lowercase.(metadata.input["FGH"]["method"]) == "iterative"
-        println("\n\t** Iterative diagonalization with Lanczos algorithm **\n")
+        println("\n\t** Iterative diagonalization with Lanczos algorithm **")
         (vals, vecs) = Lanczos_algorithm(H, 
             metadata.input["FGH"]["Nmax"],
             tol=10.0^(-metadata.input["FGH"]["advanced"]["tol"]),
@@ -451,7 +455,15 @@ function print_hello()
 \t
 \t               Don't Panic!
 
-   """
+
+\t Script calculates variationaly eigenstates and
+\t eigenenergies of the Hamiltonian operator in
+\t Discrete Variable Representation (DVR) using
+\t Fourier Grid Hamiltonian (FGH) method.
+\t C. C. Marston, G. G. Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576,
+\t   DOI:10.1063/1.456888
+
+"""
    println(hello)
    flush(stdout)
 end
@@ -462,11 +474,12 @@ end
 ============================================#
 
 starttime = now()
-println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+println("\n  Started " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
 
 # Print hello message:
 print_hello()
 
+# Parse input file and collect all input parameters into metadata object:
 metadata = MetaData(inputfile=infile)
 metadata = prepare_inp_param(metadata)
 println("\t============> FGH algorithm started! <=============\n")
@@ -491,6 +504,6 @@ println("\tEigenstates and energies saved to `eigenstates.nc` file.")
 
 # End of the program:
 endtime = now()
-println("\n  Finished successfully " * Dates.format(endtime, "on dd/mm/yyyy at HH:MM:SS") )
+println("\n  Finished " * Dates.format(endtime, "on dd/mm/yyyy at HH:MM:SS") )
 println("  Total runtime: " * Dates.format(convert(DateTime, endtime-starttime ), "HH:MM:SS") * "\n")
 
