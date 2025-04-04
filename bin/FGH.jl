@@ -481,6 +481,7 @@ end
 
 starttime = now()
 println("\n  Started " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+println("\t **** Running with $(Threads.nthreads()) threads ****\n")
 
 # Print hello message:
 print_hello()
