@@ -181,7 +181,8 @@ function read_potential(filepath::String)
     end
 end
 
-function construct_ith_column(k_space::Array{Float64}, i::Int, pfft, pifft)
+function construct_ith_column(k_space::Union{Array{Number},Matrix{ComplexF32},Matrix{ComplexF64}},
+     i::Int, pfft, pifft)
     #= Construct the i-th column of the kinetic energy operator 
         Requires planned FFT and IFFT. =#
 	# Prepare one-hot vector:
@@ -199,11 +200,18 @@ function construct_ith_column(k_space::Array{Float64}, i::Int, pfft, pifft)
 	end
 end
 
-function construct_T(k_space::Array{Float64})
+function construct_T(k_space::Union{Array{Number},Matrix{ComplexF32}}, metadata::MetaData)
     #= Construct the kinetic energy operator =#
 	N = length(k_space)
-    # Initialize the kinetic energy operator as Matrix{Complex{Float64}}
-	T = zeros(N,N) .+ im*zeros(N,N)
+    # Initialize the kinetic energy operator 
+    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+        T = zeros(ComplexF32, N,N)
+        k_space = ComplexF32.(k_space) 
+    elseif lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "double"
+        T = zeros(ComplexF64, N,N) 
+    else
+        throw(ArgumentError("Unknown precision. Use 'Double' or 'Single'."))
+    end
     # Plan forward and inverse FFT:
     pfft = plan_fft(k_space)
     pifft = plan_ifft(k_space)
@@ -216,10 +224,19 @@ function construct_T(k_space::Array{Float64})
 	return T
 end
 
-function construct_H(k_space::Array{Float64}, pot::Array{Float64})
+function construct_H(metadata::MetaData)
     #= Construct the Hamiltonian operator =#
-	T = construct_T(k_space)
-	V = Diagonal(diagm(vcat(pot...)))
+    k_space = metadata.k_space
+    pot = metadata.potential
+    # Convert potential to single-precision if requested:
+    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+        pot = ComplexF32.(pot)
+        k_space = ComplexF32.(k_space)
+    end
+    # Kinetic energy operator in matrix representation:
+	T = construct_T(k_space, metadata)
+    # Potential energy operator in matrix representation:
+	V = Diagonal(vcat(pot...))
 	H = T .+ V
     # return H as Hermitian matrix:
 	H = Hermitian(H)
@@ -333,24 +350,29 @@ function execute_FGH(metadata::MetaData)
     #= Execute the FGH algorithm =#
     # Prepare Hamiltonian:
     println("\tConstructing Hamiltonian...")
-    resH = @timed construct_H(metadata.k_space, metadata.potential)
+    flush(stdout)
+    resH = @timed construct_H(metadata)
     H = resH.value
     # Print Hamiltonian info:
     println(@sprintf "\t  %-28s%8d × %d" "Hamiltonian matrix size:" size(H,1) size(H,2))
     println(@sprintf "\t  %-28s%8d s" "Time for construction:" resH.time)
-    println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
+    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory (estimated):" (size(H,1)^2*8 / 1024^3))
+    else
+        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory (estimated):" (size(H,1)^2*16 / 1024^3))
+    end
     #println("\t  Memory allocated: $(Int(round(resH.bytes / 1024^2))) MB")
     flush(stdout)
 
     # Call garbage collector:
     GC.gc()
-        
-    # Convert to single precision if requested:
-    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
-        H = convert_to_single(H)
-        println("\n\tConverting to single precision...")
-    end
-    flush(stdout)
+       
+    # # Convert to single precision if requested:
+    # if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+    #     H = convert_to_single(H)
+    #     println("\n\tConverting to single precision...")
+    # end
+    # flush(stdout)
     
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
@@ -481,7 +503,7 @@ end
 
 starttime = now()
 println("\n  Started " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
-println("\t **** Running with $(Threads.nthreads()) threads ****\n")
+println("\t**** Running with $(Threads.nthreads()) threads ****\n")
 
 # Print hello message:
 print_hello()
