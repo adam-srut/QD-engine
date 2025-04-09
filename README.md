@@ -5,7 +5,7 @@ Exact quantum dynamics on one- or two-dimensional potentials from *ab initio* ca
 ## Installation
 The package relies only on Julia (tested against version 1.9.0) and does not have to be compiled. The following packages are needed:
 ```
-ArgParse, Plots, NCDatasets, Trapz, SpecialPolynomials, FFTW, OffsetArrays, YAML, Dates, UnicodePlots, Interpolations
+ArgParse, Plots, NCDatasets, Trapz, SpecialPolynomials, FFTW, OffsetArrays, YAML, Dates, Interpolations, KrylovKit
 ```
 To enhance performance you can use Intel's MKL for Fourier transform with `FFTW.set_provider!("mkl")` in Julia REPL.
 
@@ -40,7 +40,7 @@ The split operator formalism [1] considers the non-commutability of $\hat{T}$ an
 ```
 
 ---
-&nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433. [DOI](https://doi.org/10.1016/0021-9991(82)90091-2)
+&nbsp;&nbsp;&nbsp;&nbsp;[1] Feit, Fleck & Steiger, *J. Comput. Phys.*, **1982**, *47*, 412–433. [DOI:10.1016/0021-9991(82)90091-2](https://doi.org/10.1016/0021-9991(82)90091-2)
 
 ## Implementation
 The time propagation is implemented with 3 operators:
@@ -239,9 +239,9 @@ Raman:
 ```
 The structure of the input block is similar to the `spectrum` block described above. The important part is the index of the final scattering state $\psi_f$ in the `eigenstates.nc` file, which is described above. It is also possible to provide a list of indices. Furthermore, file `WF.nc` from an excited state propagation has to be present to compute the cross-correlation function.
 
-&nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*, **1979**, *71*(12), 4777–4788. [DOI](https://doi.org/10.1063/1.438316)
+&nbsp;&nbsp;&nbsp;&nbsp;[2] Lee & Heller, *J. Chem. Phys.*, **1979**, *71*(12), 4777–4788. [DOI:10.1063/1.438316](https://doi.org/10.1063/1.438316)
 
----
+<!-- ---
 ### Beyond Condon approximation
 For calculation of the absorption spectrum and the resonance Raman absorption profile is possible to go beyond the Condon approximation by providing magnitudes of the transition dipole moment on a grid. The feature can be requested by adding the following to the input file:
 ```
@@ -260,7 +260,7 @@ Spectrum is calculated with the inclusion of the transition dipole moment $\mu$ 
     \cdot \mathrm{LS}(t)\,e^{i(\omega + \frac{E_0}{\hbar})t} \mathrm{d}t
 \end{equation}
 ```
-Note that by adding the keyword `noncondon` into the input file quantity $e^{-\frac{i}{\hbar}\hat{\mathcal{H}}t} \mu \psi(0)$ will be saved in the `WF.nc` file.
+Note that by adding the keyword `noncondon` into the input file quantity $e^{-\frac{i}{\hbar}\hat{\mathcal{H}}t} \mu \psi(0)$ will be saved in the `WF.nc` file. -->
 
 ---
 ### IR intensities
@@ -278,3 +278,32 @@ IR intensities are calculated for the transition from the first state in the `ei
     f_\mathrm{osc.} &= \frac{4\pi\,\nu_{if}}{3} |\mu_{i\rightarrow f}|^2
 \end{align}
 ```
+
+---
+### Fourier Grid Hamiltonian
+Variational calculation of eigenstates and energies with Fourier Grid Hamiltonian method.[3]
+User must provide a file with the potential energy and specify the mass of the particles (two masses for 2D-potentials). A full diagonalization of the Hamiltonian can be preformed (`method: "exact"`) or only the lowest eigenvalues can be calculated using Lanczos algorithm (`method: "iterative"`). Example input file might look like this:
+```
+dimensions : 1          # Number of dimensions:
+potential : "GS_pot.nc" # File with a potential (expected in NetCDF format)
+mass : 14.006           # for 2D use [14.006, 14.006]
+
+# Fouried Grid Hamiltonian method:
+FGH:
+    Nmax: 5               # Number of eigenvalues and eigenstates to calculate
+    method: "iterative"   # Method for matrix diagonalization
+```
+Output is going to be saved to `eigenstates.nc` file.
+
+It is possible to use non-default advanced parameters. This might be desiable when dealing with 2D potentials, where a lot of memory is needed to store the Hamiltonian matrix.
+Especially constructing the Hamiltonian in single-precision. Following block can be added to under the `FGH` keyword:
+```
+advanced:                  # Advanced options 
+    precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
+    krylovdim: 100         # Dimension of Krylov subspace
+    tol: 12                # Requested accuracy
+    maxiter: 100           # Maximum number of iterations
+    verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;[3] C. C. Marston, G. G. Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576, [DOI:10.1063/1.456888](https://doi.org/10.1063/1.456888)

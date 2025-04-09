@@ -367,13 +367,6 @@ function execute_FGH(metadata::MetaData)
     # Call garbage collector:
     GC.gc()
        
-    # # Convert to single precision if requested:
-    # if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
-    #     H = convert_to_single(H)
-    #     println("\n\tConverting to single precision...")
-    # end
-    # flush(stdout)
-    
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
     if lowercase.(metadata.input["FGH"]["method"]) == "exact"
@@ -382,6 +375,7 @@ function execute_FGH(metadata::MetaData)
     # Iterative diagonalization:
     elseif lowercase.(metadata.input["FGH"]["method"]) == "iterative"
         println("\n\t** Iterative diagonalization with Lanczos algorithm **")
+        flush(stdout)
         (vals, vecs) = Lanczos_algorithm(H, 
             metadata.input["FGH"]["Nmax"],
             tol=10.0^(-metadata.input["FGH"]["advanced"]["tol"]),
