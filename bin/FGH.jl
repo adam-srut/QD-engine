@@ -13,7 +13,8 @@
 ****   QD-Engine package.                     ****
 ****   Reads `input.yml`                      ****
 ****   Constructs Hamiltoninan in DVR,        ****
-****   returns eigenenergies and eigenstates. ****
+****   returns eigenenergies and eigenstates  ****
+****   in `eigenstates.nc` file.              ****
 **************************************************
 ==================================================#
 
@@ -181,32 +182,31 @@ function read_potential(filepath::String)
     end
 end
 
-function construct_ith_column(k_space::Union{Array{Number},Matrix{ComplexF32},Matrix{ComplexF64}},
-     i::Int, pfft, pifft)
+function construct_ith_column(k_space::Union{Array, Matrix}, i::Int, pfft, pifft)
     #= Construct the i-th column of the kinetic energy operator 
         Requires planned FFT and IFFT. =#
-	# Prepare one-hot vector:
-	phi = zeros(size(k_space)...)
-	phi[i] = 1
-	# Calculate i-th column of the T operator:
-	Tx = pifft * (k_space .* (pfft * phi))
+    # Prepare one-hot vector:
+    phi = zeros(size(k_space)...)
+    phi[i] = 1
+    # Calculate i-th column of the T operator:
+    Tx = pifft * (k_space .* (pfft * phi))
     # Unwrap the results into a vector for 2D:
-	if ndims(Tx) == 2 
-		return vcat(Tx...)
-	elseif ndims(Tx) == 1
-		return Tx
-	else
-		error("Wrong number of dimensions. Expects 1 or 2, got: $(ndims(Tx))")
-	end
+    if ndims(Tx) == 2 
+        return vcat(Tx...)
+    elseif ndims(Tx) == 1
+        return Tx
+    else
+        error("Wrong number of dimensions. Expects 1 or 2, got: $(ndims(Tx))")
+    end
 end
 
-function construct_T(k_space::Union{Array{Number},Matrix{ComplexF32}}, metadata::MetaData)
+function construct_T(k_space::Union{Array, Matrix}, metadata::MetaData)
     #= Construct the kinetic energy operator =#
-	N = length(k_space)
+    N = length(k_space)
     # Initialize the kinetic energy operator 
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
         T = zeros(ComplexF32, N,N)
-        k_space = ComplexF32.(k_space) 
+        k_space = Float32.(k_space) 
     elseif lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "double"
         T = zeros(ComplexF64, N,N) 
     else
@@ -217,11 +217,11 @@ function construct_T(k_space::Union{Array{Number},Matrix{ComplexF32}}, metadata:
     pifft = plan_ifft(k_space)
     # Construct the kinetic energy operator column by column:
     #   Use emabarassingly parallel approach with @threads
-	@threads for icol in 1:N
-		Tcol = construct_ith_column(k_space, icol, pfft, pifft)
-		T[:,icol] .= Tcol
-	end
-	return T
+    @threads for icol in 1:N
+        Tcol = construct_ith_column(k_space, icol, pfft, pifft)
+        T[:,icol] .= Tcol
+    end
+    return T
 end
 
 function construct_H(metadata::MetaData)
@@ -231,23 +231,23 @@ function construct_H(metadata::MetaData)
     # Convert potential to single-precision if requested:
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
         pot = ComplexF32.(pot)
-        k_space = ComplexF32.(k_space)
+        k_space = Float32.(k_space)
     end
     # Kinetic energy operator in matrix representation:
-	T = construct_T(k_space, metadata)
+    T = construct_T(k_space, metadata)
     # Potential energy operator in matrix representation:
-	V = Diagonal(vcat(pot...))
-	H = T .+ V
+    V = Diagonal(vcat(pot...))
+    H = T .+ V
     # return H as Hermitian matrix:
-	H = Hermitian(H)
-	return H
+    H = Hermitian(H)
+    return H
 end
 
 function exact_diagonalization(H::Union{Hermitian, Matrix}, nmax::Int)
     #= Exact diagonalization of the Hamiltonian operator 
         Calculates all eigenvalues and eigenvectors, but returns only `nmax`. =#
     H = Hermitian(H)
-	result = @timed eigen(H)
+    result = @timed eigen(H)
     F = result.value
     # Print runtime info:
     println("\n\t==========> Diagonalization finished! <==========")
@@ -255,7 +255,7 @@ function exact_diagonalization(H::Union{Hermitian, Matrix}, nmax::Int)
         \t  Time needed $(round(result.time)) seconds
         \t  Memory used $(round(result.bytes / 1024^3, digits=2)) GB
     """)
-	return (F.values[1:nmax], F.vectors[:,1:nmax])
+    return (F.values[1:nmax], F.vectors[:,1:nmax])
 end
 
 function Lanczos_algorithm(H::Union{Hermitian, Matrix}, nmax::Int;
@@ -292,17 +292,17 @@ end
 function renormalize_vectors(vecs::Matrix, metadata::MetaData)
     #= Renormalize the eigenvectors =#
     if metadata.input["dimensions"] == 1
-	    (Nx, NVecs) = size(vecs)
-	    vecs_rnm = copy(vecs)
-	    for ivec in 1:NVecs
+        (Nx, NVecs) = size(vecs)
+        vecs_rnm = copy(vecs)
+        for ivec in 1:NVecs
             # convert to a real vector:
             vec = exp.(-im*angle.(vecs[:, ivec])) .* vecs[:, ivec]
             vec = real.(vec)
             # calculate the norm:
-		    n = trapz(metadata.xdim, vec .^2 )
-		    vecs_rnm[:, ivec] = vec/n
-	    end
-	    return vecs_rnm
+            n = trapz(metadata.xdim, vec .^2 )
+            vecs_rnm[:, ivec] = vec/n
+        end
+        return vecs_rnm
     elseif metadata.input["dimensions"] == 2
         (Nx, Ny) = size(metadata.k_space)
         (_, NVecs) = size(vecs)
@@ -357,16 +357,17 @@ function execute_FGH(metadata::MetaData)
     println(@sprintf "\t  %-28s%8d × %d" "Hamiltonian matrix size:" size(H,1) size(H,2))
     println(@sprintf "\t  %-28s%8d s" "Time for construction:" resH.time)
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
-        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory (estimated):" (size(H,1)^2*8 / 1024^3))
+        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*8 / 1024^3))
     else
-        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory (estimated):" (size(H,1)^2*16 / 1024^3))
+        println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
     end
-    #println("\t  Memory allocated: $(Int(round(resH.bytes / 1024^2))) MB")
+    # println(@sprintf "\t  %-28s%8.2f GB" "Total memory allocated:" Int(round(resH.bytes / 1024^3)))
     flush(stdout)
 
     # Call garbage collector:
     GC.gc()
-       
+    
+    # println(typeof(H)) #  Check the type of the Hamiltonian matrix
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
     if lowercase.(metadata.input["FGH"]["method"]) == "exact"

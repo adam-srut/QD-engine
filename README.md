@@ -295,7 +295,7 @@ FGH:
 ```
 Output is going to be saved to `eigenstates.nc` file.
 
-It is possible to use non-default advanced parameters. This might be desiable when dealing with 2D potentials, where a lot of memory is needed to store the Hamiltonian matrix.
+It is possible to use non-default advanced parameters. This might be desireable when dealing with 2D potentials, where a lot of memory is needed to store the Hamiltonian matrix.
 Especially constructing the Hamiltonian in single-precision. Following block can be added to under the `FGH` keyword:
 ```
 advanced:                  # Advanced options 
@@ -306,4 +306,4 @@ advanced:                  # Advanced options
     verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
 ```
 
-&nbsp;&nbsp;&nbsp;&nbsp;[3] C. C. Marston, G. G. Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576, [DOI:10.1063/1.456888](https://doi.org/10.1063/1.456888)
+&nbsp;&nbsp;&nbsp;&nbsp;[3] Marston & Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576, [DOI:10.1063/1.456888](https://doi.org/10.1063/1.456888)
