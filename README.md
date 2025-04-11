@@ -300,7 +300,7 @@ Especially constructing the Hamiltonian in single-precision. Following block can
 ```
 advanced:                  # Advanced options 
     precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
-    krylovdim: 100         # Dimension of Krylov subspace
+    krylovdim: 100         # Dimension of the Krylov subspace
     tol: 12                # Requested accuracy
     maxiter: 100           # Maximum number of iterations
     verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 

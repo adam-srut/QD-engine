@@ -36,7 +36,7 @@ FGH:
     method: "iterative"   # Method for matrix diagonalization (see below)
     # advanced:                  # Advanced options 
     #     precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
-    #     krylovdim: 100         # Dimension of Krylov subspace
+    #     krylovdim: 100         # Dimension of the Krylov subspace
     #     tol: 12                # Requested accuracy
     #     maxiter: 100           # Maximum number of iterations
     #     verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
@@ -230,7 +230,7 @@ function construct_H(metadata::MetaData)
     pot = metadata.potential
     # Convert potential to single-precision if requested:
     if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
-        pot = ComplexF32.(pot)
+        pot = Float32.(pot)
         k_space = Float32.(k_space)
     end
     # Kinetic energy operator in matrix representation:
@@ -295,34 +295,24 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
         (Nx, NVecs) = size(vecs)
         vecs_rnm = copy(vecs)
         for ivec in 1:NVecs
-            # convert to a real vector:
-            vec = exp.(-im*angle.(vecs[:, ivec])) .* vecs[:, ivec]
-            vec = real.(vec)
+            state = vecs[:, ivec]
             # calculate the norm:
-            n = trapz(metadata.xdim, vec .^2 )
-            vecs_rnm[:, ivec] = vec/n
+            n = trapz(metadata.xdim, conj.(state) .* state )
+            vecs_rnm[:, ivec] = state/n
         end
         return vecs_rnm
     elseif metadata.input["dimensions"] == 2
         (Nx, Ny) = size(metadata.k_space)
         (_, NVecs) = size(vecs)
-        vecs_rnm = Array{Float64}(undef, Nx, Ny, NVecs)
+        vecs_rnm = Array{ComplexF64}(undef, Nx, Ny, NVecs)
         for ivec in 1:NVecs
             state = reshape(vecs[:, ivec], (Nx, Ny))
-            # convert to a real array:
-            state = exp.(-im*angle.(state)) .* state
-            state = real.(state)
             # calculate the norm:
-            n = trapz((metadata.xdim, metadata.ydim), state .^ 2 )
+            n = trapz((metadata.xdim, metadata.ydim), conj.(state) .* state )
             vecs_rnm[:, :, ivec] = state/n
         end
         return vecs_rnm
     end
-end
-
-function convert_to_single(H::Union{Matrix,Hermitian})
-    #= Convert the matrix to single precision =#
-    return Hermitian(ComplexF32.(H))
 end
 
 function prepare_inp_param(metadata::MetaData)
@@ -405,18 +395,21 @@ function save_eigenstates(eigenstates::Array, metadata::MetaData, energies::Arra
             defDim(outfile, "states", size(eigenstates, 2))
             defVar(outfile, "xdim", Float64, ("x", ))
             defVar(outfile, "potential", Float64, ("x", ))
-            defVar(outfile, "wf", Float64, ("states", "x"))
+            defVar(outfile, "wfRe", Float64, ("states", "x"))
+            defVar(outfile, "wfIm", Float64, ("states", "x"))
             defVar(outfile, "energies", Float64, ("states", ))
             outfile["xdim"][:] = metadata.xdim
             outfile["potential"][:] = metadata.potential .* constants["Eh_to_wn"]
             for (i, eigstate) in enumerate(eachcol(eigenstates))
-                outfile["wf"][i, :] = eigstate
+                outfile["wfRe"][i, :] = real.(eigstate)
+                outfile["wfIm"][i, :] = imag.(eigstate)
                 outfile["energies"][i] = energies[i]
             end
             outfile["xdim"].attrib["units"] = "Bohr"
             outfile["potential"].attrib["units"] = "wavenumbers"
-            outfile["energies"].attrib["units"] = "wavenumbers"           
-            outfile["wf"].attrib["comments"] = "Eigenstate wavefunction"           
+            outfile["energies"].attrib["units"] = "wavenumbers"
+            outfile["wfRe"].attrib["comments"] = "Real part of the wavefunction" 
+            outfile["wfIm"].attrib["comments"] = "Imaginary part of the wavefunction"           
         elseif metadata.input["dimensions"] == 2
             defDim(outfile, "x", length(metadata.xdim))
             defDim(outfile, "y", length(metadata.ydim))
@@ -424,25 +417,30 @@ function save_eigenstates(eigenstates::Array, metadata::MetaData, energies::Arra
             defVar(outfile, "xdim", Float64, ("x", ))
             defVar(outfile, "ydim", Float64, ("y", ))
             defVar(outfile, "potential", Float64, ("x", "y"))
-            defVar(outfile, "wf", Float64, ("states", "x", "y"))
+            defVar(outfile, "wfRe", Float64, ("states", "x", "y"))
+            defVar(outfile, "wfIm", Float64, ("states", "x", "y"))
             defVar(outfile, "energies", Float64, ("states", ))
             outfile["potential"][:, :] = metadata.potential .* constants["Eh_to_wn"]
             outfile["xdim"][:] = metadata.xdim
             outfile["ydim"][:] = metadata.ydim
             for (i, eigstate) in enumerate(eachslice(eigenstates, dims=3)) 
-                outfile["wf"][i, :, :] = eigstate
+                outfile["wfRe"][i, :, :] = real.(eigstate)
+                outfile["wfIm"][i, :, :] = imag.(eigstate)
                 outfile["energies"][i] = energies[i]
             end
             outfile["xdim"].attrib["units"] = "Bohr"
             outfile["ydim"].attrib["units"] = "Bohr"
             outfile["potential"].attrib["units"] = "wavenumbers"
             outfile["energies"].attrib["units"] = "wavenumbers"           
-            outfile["wf"].attrib["comments"] = "Eigenstate wavefunction"           
+            outfile["wfRe"].attrib["comments"] = "Real part of the wavefunction" 
+            outfile["wfIm"].attrib["comments"] = "Imaginary part of the wavefunction"           
         else
             throw(ArgumentError("Dynamics in $(metadata.input["dimensions"]) dimensions is not supported."))
         end
     end
 end
+
+
 
 function print_hello()
     hello = """
@@ -510,7 +508,7 @@ print_input(metadata.input)
 println("\n\t============> FGH algorithm started! <=============\n")
 flush(stdout)
 
-# Calculate eigenstates and eneregies employing the FGH method:
+# Calculate eigenstates and energies employing the FGH method:
 (vals, vecs) = execute_FGH(metadata)
 
 # Convert energies to wavenumbers:
