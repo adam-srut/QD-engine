@@ -190,14 +190,7 @@ function construct_ith_column(k_space::Union{Array, Matrix}, i::Int, pfft, pifft
     phi[i] = 1
     # Calculate i-th column of the T operator:
     Tx = pifft * (k_space .* (pfft * phi))
-    # Unwrap the results into a vector for 2D:
-    if ndims(Tx) == 2 
-        return vcat(Tx...)
-    elseif ndims(Tx) == 1
-        return Tx
-    else
-        error("Wrong number of dimensions. Expects 1 or 2, got: $(ndims(Tx))")
-    end
+    return Tx
 end
 
 function construct_T(k_space::Union{Array, Matrix}, metadata::MetaData)
@@ -219,7 +212,7 @@ function construct_T(k_space::Union{Array, Matrix}, metadata::MetaData)
     #   Use emabarassingly parallel approach with @threads
     @threads for icol in 1:N
         Tcol = construct_ith_column(k_space, icol, pfft, pifft)
-        T[:,icol] .= Tcol
+        copyto!(view(T, :, icol), Tcol)
     end
     return T
 end
