@@ -298,15 +298,20 @@ end
 
 if haskey(input["potfit"], "FWHM")
     FWHM = input["potfit"]["FWHM"]
+    do_smoothing = true
 else
-    throw(ArgumentError("FWHM keyword not found in `potfit` block!
-    Please provide the FWHM of Gaussian kernel used for smoothing the potentails (in Borhs).
-    Optimal value should be around step-size of the scan."))
+    do_smoothing = false
+    FWHM = 0.0
+    #throw(ArgumentError("FWHM keyword not found in `potfit` block!
+    #Please provide the FWHM of Gaussian kernel used for smoothing the potentails (in Borhs).
+    #Optimal value should be around step-size of the scan."))
 end
 
 if input["dimensions"] == 1
     (xdim, potential) = read_potential(input["potfit"]["potfile"])
-    potential = smoothing(potential, xdim, FWHM)
+    if do_smoothing
+        potential = smoothing(potential, xdim, FWHM)
+    end
 
 ########################## INFO
     println("""
@@ -328,7 +333,9 @@ if input["dimensions"] == 1
     end
 elseif input["dimensions"] == 2
     (potential, xdim, ydim) = read_potential2D(input["potfit"]["potfile"])
-    potential  = smoothing(potential, xdim, ydim, FWHM)
+    if do_smoothing
+        potential  = smoothing(potential, xdim, ydim, FWHM)
+    end
 
 ##########################  INFO
     println("""
