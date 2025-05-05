@@ -285,7 +285,7 @@ end
 
 function end_step!(dynamics::Dynamics)
     #= Complete integration till the next integer step:
-        exp(-i*Δt*V̂)*exp(-i*Δt/2*T̂)ψ(t) =#
+        exp(-i*Δt*V̂) * exp(-i*Δt/2*T̂)ψ(t) =#
     wf = dynamics.wf
     wf .= wf .* exp.( -(im*dynamics.dt) * dynamics.potential )
     wf .= dynamics.PFFT * wf
@@ -309,12 +309,15 @@ end
 function create_harm_state(n::Int, x_space::Array{Float64}, x0::Number,
         ω::Number, μ::Number)
     #= Function returns a harmonic vibrational level. =#
-    k = (ω*2*pi)^2 * μ
+    k = (ω*2*pi)^2 * μ # harmonic force constant
+    # Define WF of harmonic oscillator
     chi(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) * 
         basis(Hermite, n)((μ*k)^(1/4)*(x-x0)) * 
         exp( -(1/2*sqrt(μ*k) * (x-x0)^2) )
+    # Loop over grid points
     wf = [ chi(n, i) for i in x_space ]
     wf = wf .+ 0*im
+    # Renormalize WF
     wf = wf / norm(wf) 
     return wf
 end
@@ -322,15 +325,24 @@ end
 function create_harm_state_2D(;n::Int, xdim::Array{Float64}, ydim::Array{Float64}, 
         x0::Number, y0::Number, ωx::Number, μx::Number, ωy::Number, μy::Number)
     #= Function returns a harmonic vibrational level. =#
-    (kx, ky) = ((ωx*2*pi)^2 * μx, (ωy*2*pi)^2 * μy)
+    (kx, ky) = ((ωx*2*pi)^2 * μx, (ωy*2*pi)^2 * μy) # harmonic force constants
+	# Define WF of harmonic oscillator in x- and y-direction
+	#    quantum number 'n' is now redunant and assumed to be zero
     chix(n::Int, x::Float64) = 1/(sqrt(2^n*factorial(n))) *
         basis(Hermite, n)((μx*kx)^(1/4)*(x-x0)) *
         exp( -(1/2*sqrt(μx*kx) * (x-x0)^2) )
     chiy(n::Int, y::Float64) = 1/(sqrt(2^n*factorial(n))) *
         basis(Hermite, n)((μy*ky)^(1/4)*(y-y0)) *
         exp( -(1/2*sqrt(μy*ky) * (y-y0)^2) )
-    wf = vcat([ [chix(n, x)*chiy(n, y) for x in xdim] for y in ydim ]'...)
-    wf = wf .+ 0*im
+	# Initialize outup array
+	wf = Array{ComplexF64}(undef, length(xdim), length(ydim))
+	# Loop over grid points
+	for (ix, x) in enumerate(xdim)
+		for (iy, y) in enumerate(ydim)
+			wf[ix, iy] = chix(n, x)*chiy(n, y)
+		end
+	end
+	# Renormalize WF
     wf = wf ./ norm(wf)
     return wf
 end
@@ -518,6 +530,7 @@ end
 
 starttime = now()
 println("\n\tStarted " * Dates.format(starttime, "on dd/mm/yyyy at HH:MM:SS") * "\n")
+println("\t**** Running with $(Threads.nthreads()) threads ****\n")
 flush(stdout)
 
 # Include helper functions:
