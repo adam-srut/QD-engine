@@ -280,30 +280,42 @@ IR intensities are calculated for the transition from the first state in the `ei
 ```
 
 ---
-### Fourier Grid Hamiltonian
-Variational calculation of eigenstates and energies with Fourier Grid Hamiltonian method.[3]
-User must provide a file with the potential energy and specify the mass of the particles (two masses for 2D-potentials). A full diagonalization of the Hamiltonian can be preformed (`method: "exact"`) or only the lowest eigenvalues can be calculated using Lanczos algorithm (`method: "iterative"`). Example input file might look like this:
+### Variational solution of time-independent Schrödinger equation on a grid
+User can request a variational calculation of eigenstates and energies with the Dynamic Fourier Method. [3]
+This calculation exploits the fact that iterative diagonalization methods based on Krylov subspaces do not need access to the full matrix as long as the action of the matrix on a random vector is available.
+The action of the Hamiltonian is then calculated via the Dynamic Fourier Method and the eigenstates and energies are found without the necessity of constructing the full Hamiltonian matrix.
+
+User must provide a file with the potential energy and specify the mass of the particles (two masses for 2D-potentials). 
+The method is invoked with `variational` keyword. Number of eigenstates to calculated is given in a sub-block with `Nmax` keyword.
+Example input file might look like this:
 ```
 dimensions : 1          # Number of dimensions:
 potential : "GS_pot.nc" # File with a potential (expected in NetCDF format)
 mass : 14.006           # for 2D use [14.006, 14.006]
 
-# Fouried Grid Hamiltonian method:
-FGH:
-    Nmax: 5               # Number of eigenvalues and eigenstates to calculate
-    method: "iterative"   # Method for matrix diagonalization
+# Variational method:
+variational:
+    Nmax: 5                     # Number of eigenvalues and eigenstates to calculate
+    method: "DynamicFourier"    # Method for matrix diagonalization
 ```
 Output is going to be saved to `eigenstates.nc` file.
 
-It is possible to use non-default advanced parameters. This might be desireable when dealing with 2D potentials, where a lot of memory is needed to store the Hamiltonian matrix.
-Especially constructing the Hamiltonian in single-precision. Following block can be added to under the `FGH` keyword:
+It is possible to use non-default advanced parameters. This might be desireable when convergence issues of the Lanczos algorithm occur. 
 ```
-advanced:                  # Advanced options 
-    precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
-    krylovdim: 100         # Dimension of the Krylov subspace
-    tol: 12                # Requested accuracy
-    maxiter: 100           # Maximum number of iterations
-    verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
+variational:
+    Nmax: 5
+    method: "DynamicFourier"   
+    advanced:                  # Advanced options 
+        precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
+        krylovdim: 100         # Dimension of the Krylov subspace
+        tol: 12                # Requested accuracy
+        maxiter: 100           # Maximum number of iterations
+        verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
 ```
 
-&nbsp;&nbsp;&nbsp;&nbsp;[3] Marston & Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576, [DOI:10.1063/1.456888](https://doi.org/10.1063/1.456888)
+Fourier Grid Hamiltonian method is also available. [4] Option `method: "Exact"` will invoke construction of the full Hamiltonian matrix and also the full diagonalization.
+This is useful for 1D potentials and when degenerate states might occur.
+For larged grids, this methods become quickly too demanding memory-wise. Lastly, construction of the full Hamiltonian and diagonalization with Lanczos algorithm can be requested with `method: "Iterative"`, this method is obsolete and does not have advantages over the Dynamic Fourier Method.
+
+&nbsp;&nbsp;&nbsp;&nbsp;[3] Kosloff & Kosloff J. Chem. Phys., 79(4), 1983, [DOI:10.1063/1.445959](https://doi.org/10.1063/1.445959) \
+&nbsp;&nbsp;&nbsp;&nbsp;[4] Marston & Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576, [DOI:10.1063/1.456888](https://doi.org/10.1063/1.456888)

@@ -2,7 +2,8 @@
 
 #==================================================
 **************************************************
-****    Fourier Grid Hamiltonian Tool         ****
+****        Variational Solution of           ****
+****  Time-independent Schrödinger Equation   ****
 **************************************************
 **** Created at TU Darmstadt in Krewald Group.****
 **************************************************
@@ -11,10 +12,9 @@
 **************************************************
 **** The script is a standalone part of       ****
 ****   QD-Engine package.                     ****
-****   Reads `input.yml`                      ****
-****   Constructs Hamiltoninan in DVR,        ****
-****   returns eigenenergies and eigenstates  ****
-****   in `eigenstates.nc` file.              ****
+****   Finds eigenstates and energies of      ****
+****   Hamiltoninan in Discrete Value         **** 
+****   Representation.                        ****
 **************************************************
 ==================================================#
 
@@ -30,10 +30,10 @@ potential : "GS_pot.nc"
 # Mass of the particle (in amu)
 mass : 14.006  # for 2D use [14.006, 14.006]
 
-# Fouried Grid Hamiltonian method:
-FGH:
+# Variational method parameters:
+variational:
     Nmax: 5               # Number of eigenvalues and eigenstates to calculate
-    method: "iterative"   # Method for matrix diagonalization (see below)
+    method: "DynamicFourier"     # Method for matrix diagonalization (default: "DynamicFourier")
     # advanced:                  # Advanced options 
     #     precision: "Double"    # Precision of the matrix elements ("Double" or "Single")
     #     krylovdim: 100         # Dimension of the Krylov subspace
@@ -41,7 +41,8 @@ FGH:
     #     maxiter: 100           # Maximum number of iterations
     #     verbosity: 1           # Verbosity level (1-only warnings; 3-info after every iteration) 
 
-# User can choose between "Iterative" and "Exact" method for diagonalization of Hamiltonian
+# 
+# Other possible methods are: "Iterative" and "Exact" 
 #   Iterative refers to Lanzcos algorithm using KrylovKit package.
 #   Exact diagonalization is suitable for small grids (i.e. 1D potentials)
 
@@ -58,7 +59,7 @@ using Trapz
 using Base.Threads
 
 # Set number of threads for numerical routines:
-# Keep FFTW serial; parallelize outer loop for H construction: `construct_T` function
+# Keep FFTW serial, FT is pre-planned.
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(Threads.nthreads()) 
 KrylovKit.set_num_threads(Threads.nthreads())
@@ -197,10 +198,10 @@ function construct_T(k_space::Union{Array, Matrix}, metadata::MetaData)
     #= Construct the kinetic energy operator =#
     N = length(k_space)
     # Initialize the kinetic energy operator 
-    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+    if lowercase.(metadata.input["variational"]["advanced"]["precision"]) == "single"
         T = zeros(ComplexF32, N,N)
         k_space = Float32.(k_space) 
-    elseif lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "double"
+    elseif lowercase.(metadata.input["variational"]["advanced"]["precision"]) == "double"
         T = zeros(ComplexF64, N,N) 
     else
         throw(ArgumentError("Unknown precision. Use 'Double' or 'Single'."))
@@ -222,7 +223,7 @@ function construct_H(metadata::MetaData)
     k_space = metadata.k_space
     pot = metadata.potential
     # Convert potential to single-precision if requested:
-    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+    if lowercase.(metadata.input["variational"]["advanced"]["precision"]) == "single"
         pot = Float32.(pot)
         k_space = Float32.(k_space)
     end
@@ -236,10 +237,36 @@ function construct_H(metadata::MetaData)
     return H
 end
 
+function make_linear_map(metadata::MetaData)
+    #= Define the action of the Hamiltonian matrix as a linear map.
+        This avoids storing the full matrix in memory.
+    =#
+    # Plan forward and inverse FFT:
+    pfft = plan_fft(metadata.k_space)
+    pifft = plan_ifft(metadata.k_space)
+    # Define the linear map:
+    return function(state_vector::Vector)
+        # Reshape the state vector to match the 2D grid:
+        if metadata.input["dimensions"] == 2
+            state_vector = reshape(state_vector, (length(metadata.xdim), length(metadata.ydim)))
+        end
+        # Apply the potential energy operator:
+        Vket = metadata.potential .* state_vector
+        # Apply the kinetic energy operator in k-space:
+        Tket = pfft * state_vector          # forward FT
+        Tket = metadata.k_space .* Tket     # apply the kinetic energy operator
+        Tket = pifft * Tket                 # inverse FT
+        # Add the kinetic and potential energy operators:
+        state_vector = Tket .+ Vket
+        state_vector = vec(state_vector) # flatten the state vector
+        return state_vector
+    end 
+end
+
 function exact_diagonalization(H::Union{Hermitian, Matrix}, nmax::Int)
     #= Exact diagonalization of the Hamiltonian operator 
         Calculates all eigenvalues and eigenvectors, but returns only `nmax`. =#
-    H = Hermitian(H)
+    # Diagonalize the Hamiltonian:
     result = @timed eigen(H)
     F = result.value
     # Print runtime info:
@@ -251,7 +278,7 @@ function exact_diagonalization(H::Union{Hermitian, Matrix}, nmax::Int)
     return (F.values[1:nmax], F.vectors[:,1:nmax])
 end
 
-function Lanczos_algorithm(H::Union{Hermitian, Matrix}, nmax::Int;
+function Lanczos_algorithm(H::Union{Hermitian, Matrix, Function}, nmax::Int, guess::Array{ComplexF64};
         tol::Float64=KrylovDefaults.tol, 
         maxiter::Int=KrylovDefaults.maxiter, 
         krylovdim::Int=100,
@@ -259,6 +286,7 @@ function Lanczos_algorithm(H::Union{Hermitian, Matrix}, nmax::Int;
     #= Iterative Lanczos algorithm for diagonalization of the Hamiltonian operator
         using KrylovKit package =#
     result = @timed eigsolve(H,
+        guess,                  # initial guess for the eigenvector
         nmax,                   # calculate nmax eigenvalues
         :SR,                    # search for smallest eigenvalues
         tol=tol,                # set tolerance (default: 1e-12)
@@ -277,7 +305,7 @@ function Lanczos_algorithm(H::Union{Hermitian, Matrix}, nmax::Int;
     println(@sprintf "\t  %-32s%10d" "Number of converged eigenvalues" info.converged)
     println(@sprintf "\t  %-32s%10d" "Number of Krylov vectors" krylovdim)
     println(@sprintf "\t  %-32s%10d s" "Time needed" result.time) 
-    println(@sprintf "\t  %-32s%10.2f GB" "Total memory allocated" result.bytes / 1024^3) 
+    #println(@sprintf "\t  %-32s%10.2f GB" "Total memory allocated" result.bytes / 1024^3) 
     # return the eigenvalues and eigenvectors:
     return (vals, vecs)
 end
@@ -309,7 +337,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
 end
 
 function prepare_inp_param(metadata::MetaData)
-    #= Prepare input parameters for the FGH algorithm =#
+    #= Prepare input parameters for the variational algorithm =#
     advancedParams = Dict(
             "precision" => "Double",  # Precision of the calculation
             "tol" => 12,              # Tolerance for iterative methods
@@ -317,20 +345,49 @@ function prepare_inp_param(metadata::MetaData)
             "krylovdim" => 100,       # Krylov subspace dimension
             "verbosity" => 1          # Verbosity level
         )
+    # Check if method is provided:
+    if !haskey(metadata.input["variational"], "method")
+        metadata.input["variational"]["method"] = "DynamicFourier"        
+    end
     # Check if the user provided advanced parameters:
-    if haskey(metadata.input["FGH"], "advanced")
+    if haskey(metadata.input["variational"], "advanced")
         # Merge default parameters with user-defined parameters
-        for (key, value) in metadata.input["FGH"]["advanced"]
+        for (key, value) in metadata.input["variational"]["advanced"]
             advancedParams[key] = value
         end
     end
     # Merge advanced parameters with default parameters:
-    metadata.input["FGH"]["advanced"] = advancedParams
+    metadata.input["variational"]["advanced"] = advancedParams
     return metadata
 end
 
-function execute_FGH(metadata::MetaData)
-    #= Execute the FGH algorithm =#
+function execute_variational(metadata::MetaData)
+    #= Execute the variational algorithm =#
+    
+    # Dynamic Fourier Method (avoid constructing of the full Hamiltonian matrix): 
+    if lowercase.(metadata.input["variational"]["method"]) == "dynamicfourier"
+        println("\n\tDynamic Fourier method: ")
+        println("\t  The full Hamiltonian matrix will *not* be constructed.")
+        println("\t  Actions of kinetic and potential energy operators are calculated directly.")
+        println("\n\t** Iterative diagonalization with Lanczos algorithm **")
+        flush(stdout)
+        # Create a linear map of the Hamiltonian:
+        Hmap = make_linear_map(metadata)
+        # Diagonalize the Hamiltonian:
+        (vals, vecs) = Lanczos_algorithm(Hmap, 
+            metadata.input["variational"]["Nmax"],
+            rand(ComplexF64, length(metadata.k_space)),
+            tol=10.0^(-metadata.input["variational"]["advanced"]["tol"]),
+            maxiter=metadata.input["variational"]["advanced"]["maxiter"],
+            krylovdim=metadata.input["variational"]["advanced"]["krylovdim"],
+            verbosity=metadata.input["variational"]["advanced"]["verbosity"]
+            )
+        # Renormalize the eigenvectors:
+        vecs_rnm = renormalize_vectors(vecs, metadata)
+        # Return the eigenvalues and eigenvectors:
+        return (vals, vecs_rnm)
+    end
+    
     # Prepare Hamiltonian:
     println("\tConstructing Hamiltonian...")
     flush(stdout)
@@ -339,7 +396,7 @@ function execute_FGH(metadata::MetaData)
     # Print Hamiltonian info:
     println(@sprintf "\t  %-28s%8d × %d" "Hamiltonian matrix size:" size(H,1) size(H,2))
     println(@sprintf "\t  %-28s%8d s" "Time for construction:" resH.time)
-    if lowercase.(metadata.input["FGH"]["advanced"]["precision"]) == "single"
+    if lowercase.(metadata.input["variational"]["advanced"]["precision"]) == "single"
         println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*8 / 1024^3))
     else
         println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
@@ -350,25 +407,25 @@ function execute_FGH(metadata::MetaData)
     # Call garbage collector:
     GC.gc()
     
-    # println(typeof(H)) #  Check the type of the Hamiltonian matrix
     # Diagonalize the Hamiltonian:
     # Full-exact diagonalization:
-    if lowercase.(metadata.input["FGH"]["method"]) == "exact"
+    if lowercase.(metadata.input["variational"]["method"]) == "exact"
         println("\n\t**** Full Exact diagonalization ****")
-        (vals, vecs) = exact_diagonalization(H, metadata.input["FGH"]["Nmax"])
+        (vals, vecs) = exact_diagonalization(H, metadata.input["variational"]["Nmax"])
     # Iterative diagonalization:
-    elseif lowercase.(metadata.input["FGH"]["method"]) == "iterative"
+    elseif lowercase.(metadata.input["variational"]["method"]) == "iterative"
         println("\n\t** Iterative diagonalization with Lanczos algorithm **")
         flush(stdout)
         (vals, vecs) = Lanczos_algorithm(H, 
-            metadata.input["FGH"]["Nmax"],
-            tol=10.0^(-metadata.input["FGH"]["advanced"]["tol"]),
-            maxiter=metadata.input["FGH"]["advanced"]["maxiter"],
-            krylovdim=metadata.input["FGH"]["advanced"]["krylovdim"],
-            verbosity=metadata.input["FGH"]["advanced"]["verbosity"]
+            metadata.input["variational"]["Nmax"],
+            rand(ComplexF64, size(H, 1)),
+            tol=10.0^(-metadata.input["variational"]["advanced"]["tol"]),
+            maxiter=metadata.input["variational"]["advanced"]["maxiter"],
+            krylovdim=metadata.input["variational"]["advanced"]["krylovdim"],
+            verbosity=metadata.input["variational"]["advanced"]["verbosity"]
             )
     else
-        throw(ArgumentError("Unknown method. Use 'Exact' or 'Iterative'."))
+        throw(ArgumentError("Unknown method. Use 'Exact', 'Iterative' or 'DynamicFourier'."))
     end
     flush(stdout)  
 
@@ -377,12 +434,12 @@ function execute_FGH(metadata::MetaData)
     return (vals, vecs_rnm)
 end
 
-function save_eigenstates(eigenstates::Array, metadata::MetaData, energies::Array)
+function save_eigenstates(eigenstates::Array, metadata::MetaData, energies::Array; 
+    name::String="eigenstates.nc")
     #= Saves eigenstate as NetCDF file =#
-    name = "eigenstates.nc"
-    isfile(name) && rm(name)
+    isfile(name) && rm(name) # Remove an existing file
     NCDataset(name, "c") do outfile
-        outfile.attrib["title"] = "Eigenstates and eigenenergies from FGH method."
+        outfile.attrib["title"] = "Eigenstates and eigenenergies from variational calculation."
         if metadata.input["dimensions"] == 1
             defDim(outfile, "x", length(metadata.xdim))
             defDim(outfile, "states", size(eigenstates, 2))
@@ -433,22 +490,26 @@ function save_eigenstates(eigenstates::Array, metadata::MetaData, energies::Arra
     end
 end
 
-
-
+#===================================================
+                Print functions
+===================================================#
 function print_hello()
     hello = """
 
 \t#====================================================
-\t            Fourier Grid Hamiltonian
+\t     Variational Solution of Time-Independent
+\t       Schrödinger Equation on a Grid
 \t====================================================#
 \t
 \t               Don't Panic!
 
 
-\t Script calculates variationaly eigenstates and
-\t eigenenergies of the Hamiltonian operator in
-\t Discrete Variable Representation (DVR) using
-\t Fourier Grid Hamiltonian (FGH) method.
+\t Script finds eigenstates and enenergies of the
+\t Hamiltonian operator in  Discrete Variable 
+\t Representation (DVR) using Dynamic Fourier method.
+\t Kosloff & Kosloff J. Chem. Phys., 79(4), 1983, DOI:10.1063/1.445959
+
+\t Fourier Grid Hamiltonian method is also available (but obsolete).
 \t C. C. Marston, G. G. Balint-Kurti, J. Chem. Phys., 1989, 91(6), 3571-3576,
 \t   DOI:10.1063/1.456888
 
@@ -460,24 +521,24 @@ end
 function print_input(input::Dict)
     # Print content of the input file:
     println("\t===============> Input parameters <===============")
-    println(@sprintf "\t%-28s%10d" "Number of dimensions" input["dimensions"])
+    println(@sprintf "\t%-28s%14d" "Number of dimensions" input["dimensions"])
     if input["dimensions"] == 1
-        println(@sprintf "\t%-28s%10.4f" "Mass" input["mass"])
+        println(@sprintf "\t%-28s%14.4f" "Mass" input["mass"])
     elseif input["dimensions"] == 2
-        println(@sprintf "\t%-28s%10.4f" "Mass X" input["mass"][1])
-        println(@sprintf "\t%-28s%10.4f" "Mass Y" input["mass"][2])
+        println(@sprintf "\t%-28s%14.4f" "Mass X" input["mass"][1])
+        println(@sprintf "\t%-28s%14.4f" "Mass Y" input["mass"][2])
     end
-    println(@sprintf "\t%-28s%10s" "Potential file" input["potential"])
+    println(@sprintf "\t%-28s%14s" "Potential file" input["potential"])
     if haskey(input, "kcoup")
-        println(@sprintf "\t%-28s%10.2f" "Kinetic coupling" input["kcoup"])
+        println(@sprintf "\t%-28s%14.2f" "Kinetic coupling" input["kcoup"])
     end
-    println("\tFGH parameters:")
-    for (key, value) in input["FGH"]
+    println("\tvariational parameters:")
+    for (key, value) in input["variational"]
         if key != "advanced"
-            println(@sprintf "\t  %-26s%10s" key value)
-        else
-            for (key, value) in input["FGH"]["advanced"]
-                println(@sprintf "\t  %-26s%10s" key value)
+            println(@sprintf "\t  %-26s%14s" key value)
+        elseif lowercase.(input["variational"]["method"]) != "exact"
+            for (key, value) in input["variational"]["advanced"]
+                println(@sprintf "\t  %-26s%14s" key value)
             end
         end
     end
@@ -498,11 +559,11 @@ print_hello()
 metadata = MetaData(inputfile=infile)
 metadata = prepare_inp_param(metadata)
 print_input(metadata.input)
-println("\n\t============> FGH algorithm started! <=============\n")
+println("\n\t============> Algorithm started! <=============\n")
 flush(stdout)
 
-# Calculate eigenstates and energies employing the FGH method:
-(vals, vecs) = execute_FGH(metadata)
+# Calculate eigenstates and energies employing the variational method:
+(vals, vecs) = execute_variational(metadata)
 
 # Convert energies to wavenumbers:
 vals = vals .* constants["Eh_to_wn"]
