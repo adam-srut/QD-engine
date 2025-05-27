@@ -44,8 +44,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     hanning(t::Number, T::Number) = (0 <= t <= T) ? ( 1 - cos(2*pi*t/T) )/T : 0
     cf = copy(CF)
     window = [ hanning(t, length(cf)) for t in 0:length(cf)-1 ]
-    cf = cf .* window
     cf = cf .- mean(cf)
+    cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_hann = abs.(ifft(cf)).^2 : spectrum_hann = abs.(ifft(cf))
     spectrum_hann = abs.(wns) .* spectrum_hann / totT
@@ -56,8 +56,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     fwhm = lineshapeWidth/timestep
     gauss(t::Number, fwhm::Number) = exp( -t^2/(0.6*fwhm)^2 )
     window = [ gauss(t, fwhm) for t in 0:length(cf)-1 ]
-    cf = cf .* window
     cf = cf .- mean(cf)
+    cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Gauss = abs.(ifft(cf)).^2 : spectrum_Gauss = abs.(ifft(cf))
     spectrum_Gauss = abs.(wns) .* spectrum_Gauss / totT
@@ -69,8 +69,8 @@ function compute_spectrum(CF::Array{ComplexF64}, step_stride::Int, dt::Number, N
     γ = (lineshapeWidth/timestep)^(-1)
     Δ = (lineshapeWidth*4/7/timestep)^(-1)
     window = [ kubo(t, Δ, γ) for t in 0:length(cf)-1 ]
-    cf = cf .* window
     cf = cf .- mean(cf)
+    cf = cf .* window
     cf = [ cf ; zeros(length(cf)*zff) ]
     powerspectrum ? spectrum_Kubo = abs.(ifft(cf)).^2 : spectrum_Kubo = abs.(ifft(cf)) 
     spectrum_Kubo = abs.(wns) .* spectrum_Kubo / totT

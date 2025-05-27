@@ -29,6 +29,7 @@ using NCDatasets
 using Printf, Dates, ArgParse
 using SpecialPolynomials
 using Trapz
+using Base.Threads
 
 # Set number of threads for numerical routines:
 FFTW.set_num_threads(Threads.nthreads())
@@ -220,6 +221,8 @@ function read_wf(filepath::String)
             wfImag = wffile["wfIm"][:,:]
             wf = wfReal .+ 1im*wfImag
         end
+        # renormalize wavefunction
+        wf = wf / norm(wf)
         return wf
     end
 end
@@ -656,7 +659,6 @@ if haskey(metadata.input, "imagT")
     dynamics.expV = exp.( -(im*dynamics.dt) * dynamics.potential)
 end
 
-
 #===================================================
                 Execute dynamics
 ===================================================#
@@ -665,20 +667,29 @@ print_run()
 
 outdata = execute_dynamics(dynamics, outdata)
 
-println("\n")
+println("\n\t  Finished!\n")
 
 #===================================================
             Analyze and save the results
 ===================================================#
 
+println("\t==============> Analysis <===============")
+
+# Calculate and save spectrum and correlation function
+println("\t  - Calculating spectrum")
 compute_spectrum(outdata)
 save_CF(outdata)
 
+# Calculate 1st and 2nd moments of the wavepacket
+println("\t  - Calculating moments, <ψ|x|ψ> and <ψ|x²|ψ>")
+wp_moments(outdata, metadata)
+
 # Save gnuplot scripts
+println("\t  - Saving gnuplot scripts")
 GP_spectrum()
 GP_correlation_function()
 
-# Close NetCDF file with PAmp:
+# Close NetCDF file:
 close(outdata.wf)
 
 print_output()

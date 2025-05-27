@@ -64,6 +64,81 @@ function compute_spectrum(outdata::OutData;
     end
 end
 
+function wp_moments(outdata::OutData, metadata::MetaData)
+	#= Calculates 1st and 2nd moments of the WP 
+	   According to:
+		 mean(x) = <ψ|x|ψ> / <ψ|ψ>
+	 	 var(x) = <ψ|x²|ψ> / <ψ|ψ>
+       Calculated moments are stored in the output NetCDF file.
+	=# 
+    # Get the wavepacket data
+    wp = outdata.wf
+	NSteps = wp.dim["time"]
+    # 1D case
+	if metadata.input["dimensions"] == 1
+        xdim = collect(wp["Xdim"])
+        # Calculates normalization factor
+        wp0 = wp["WFRe"][:,1] .+ im*wp["WFIm"][:,1]
+        wpNorm = real(trapz(xdim, conj.(wp0) .* wp0 ))
+        # Initialize output arrays
+        WP_center = Array{Float64}(undef, NSteps) # [x](t)
+        WP_var = Array{Float64}(undef, NSteps) # [x](t)
+        @threads for istep in 1:NSteps
+            wpi = wp["WFRe"][:,istep] .+ im*wp["WFIm"][:,istep]
+            xmean = trapz(xdim, conj.(wpi) .* xdim .* wpi ) / wpNorm
+            xvar = trapz(xdim, conj.(wpi) .* (xdim .^2) .* wpi ) / wpNorm
+            WP_center[istep] = real(xmean)
+            WP_var[istep] = real(xvar)
+        end
+        defVar(wp, "x-mean", WP_center, ("time",), attrib = Dict(
+            "units" => "Bohr",
+            "comments" => "Mean position of the wavepacket, <ψ|x|ψ>")
+            )
+        defVar(wp, "x-var", WP_var, ("time",), attrib = Dict(
+            "units" => "Bohr^2",
+            "comments" => "Variance of the wavepacket, <ψ|x²|ψ>")
+            )
+    # 2D case
+    elseif metadata.input["dimensions"] == 2
+        xdim = collect(wp["Xdim"])
+        ydim = collect(wp["Ydim"])
+        # Calculates normalization factor
+        wp0 = wp["WFRe"][:,:,1] .+ im*wp["WFIm"][:,:,1]
+        wpNorm = real(trapz((xdim, ydim), conj.(wp0) .* wp0 ))
+        # Initialize output arrays
+        WP_center = Array{Float64}(undef, 2, NSteps) # [x, y](t)
+        WP_var = Array{Float64}(undef, 2, NSteps) # [x, y](t)
+        # pre-calculate arrays with x or y values only
+        xdim_only = repeat(xdim, 1, length(ydim))
+        ydim_only = repeat(ydim', length(xdim), 1)
+        @threads for istep in 1:NSteps
+            wpi = wp["WFRe"][:,:,istep] .+ im*wp["WFIm"][:,:,istep]
+            xmean = trapz( (xdim, ydim), conj.(wpi) .* xdim_only .* wpi ) / wpNorm
+            ymean = trapz( (xdim, ydim), conj.(wpi) .* ydim_only .* wpi ) / wpNorm
+            xvar = trapz( (xdim, ydim), conj.(wpi) .* (xdim_only .^2) .* wpi ) / wpNorm
+            yvar = trapz( (xdim, ydim), conj.(wpi) .* (ydim_only .^2) .* wpi ) / wpNorm
+            WP_center[:, istep] = real.([xmean, ymean])
+            WP_var[:, istep] = real.([xvar, yvar])
+    	end
+        defVar(wp, "x-mean", WP_center[1,:], ("time",), attrib = Dict(
+            "units" => "Bohr",
+            "comments" => "Mean position of the wavepacket, <ψ|x|ψ>")
+            )
+        defVar(wp, "x-var", WP_var[1,:], ("time",), attrib = Dict(
+            "units" => "Bohr^2",
+            "comments" => "Variance of the wavepacket, <ψ|x²|ψ>")
+            )
+        defVar(wp, "y-mean", WP_center[2,:], ("time",), attrib = Dict(
+            "units" => "Bohr",
+            "comments" => "Mean position of the wavepacket, <ψ|y|ψ>")
+            )
+        defVar(wp, "y-var", WP_var[2,:], ("time",), attrib = Dict(
+            "units" => "Bohr^2",
+            "comments" => "Variance of the wavepacket, <ψ|y²|ψ>")
+            )
+    end
+	#return (WP_center, WP_var)
+end
 
 function compute_energy(dynamics::Dynamics, metadata::MetaData)
     #= Evaluate < ψ | H | ψ > using the Direct Fourier method.
