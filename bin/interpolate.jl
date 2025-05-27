@@ -206,9 +206,6 @@ function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoint
         name::String="potential")
     #= Interpolates the provided potential with the cubic spline. 
         Saves result to a NetCDF file. =#
-    if ! ispow2(NPoints)
-        @warn "Number of grid points is not a power of 2."
-    end
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     xrange = range(start=xdim[1], stop=xdim[end], length=NPoints)
@@ -266,9 +263,6 @@ function fit_potential2D(potential::Array{Float64},
         name::String="potential")
     #= Interpolates the provided potential with the cubic spline.
         Saves result to a NetCDF file. =#
-    if ! ispow2(NPointsX) || ! ispow2(NPointsY)
-        @warn "Number of grid points is not a power of 2."
-    end
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     yrange_old = range(start=ydim[1], stop=ydim[end], length=length(ydim))
@@ -382,6 +376,7 @@ elseif input["dimensions"] == 2
 \t  Y-range: [$(ydim[1]), $(ydim[end])]
 \t  Number of points before interpolation: ($(length(xdim))×$(length(ydim))) = $(length(potential))
 \t  Number of points after interpolation: ($(NPointsX)×$(NPointsY)) = $(NPointsX * NPointsY)""")
+println(@sprintf "\t  Dimensions of the new grid:\n\t   %.3f to %.3f in X\n\t   %.3f to %.3f in Y" xdim_new[1] xdim_new[end] ydim_new[1] ydim_new[end])
 ##########################
 
     if do_smoothing
