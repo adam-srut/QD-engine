@@ -96,6 +96,7 @@ function print_init(metadata::MetaData)
     end
     println("\t Minimal resolution of energy levels: ΔEₘᵢₙ = 2π/T:")
     println(@sprintf "\t\t%8.4f cm⁻¹" 2*pi/(metadata.input["params"]["Nsteps"]*metadata.input["params"]["dt"])*constants["Eh_to_wn"])
+    println("\n\n")
     if haskey(metadata.input, "imagT")
         println("\t Imaginary time propagation requested.\n\t Reference and actual potential need to have the same spatial grid")
     end
@@ -141,7 +142,6 @@ function print_run()
 \t#====================================================
 \t              Running dynamics:
 \t====================================================#
-
 """
     println(message)
     flush(stdout)
@@ -151,7 +151,7 @@ function print_output()
     message = """
 
 \t#====================================================
-\t              Analyzing and saving:
+\t                  Output:
 \t====================================================#
 \t
 \t    ψ(t,x,[y]) saved in NetCDF format to `WF.nc` file.

@@ -106,6 +106,8 @@ function read_potential2D(filepath::String)
     end
     if print_warn
         @warn "There are missing values in the potential. Check `missing_values.txt`."
+    else
+        rm("missing_values.txt")
     end
     return (potential, x_dim, y_dim)
 end
@@ -228,8 +230,40 @@ function fit_potential1D(potential::Array{Float64}, xdim::Array{Float64}, NPoint
     savefig(outname * ".png")
 end
 
-function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::Array{Float64}, 
-        NPointsX::Int, NPointsY::Int; name::String="potential")
+function define_2D_grid(x_old::Array{Float64}, y_old::Array{Float64}, Δ::Number; keep_pow2::Bool=true)
+    # Helper to find largest power of 2 less than or equal to n
+    function nearest_pow2_le(n)
+        return 2 ^ floor(Int, log2(n))
+    end
+
+	# Lengths of the grid
+	(old_Lx, old_Ly) = (x_old[end] - x_old[1], y_old[end] - y_old[1])
+		
+    # Compute the new ranges
+	if keep_pow2
+        # Determine nx and ny
+        nx = nearest_pow2_le(floor(Int, old_Lx / Δ))
+        ny = nearest_pow2_le(floor(Int, old_Ly / Δ))
+        
+        # Define starting value
+        (Lx, Ly) = (nx*Δ, ny*Δ)
+        x_start = x_old[1] + (old_Lx - Lx)/2
+        y_start = y_old[1] + (old_Ly - Ly)/2
+
+    	xrange = range(start=x_start, length=nx, step=Δ)
+		yrange = range(start=y_start, length=ny, step=Δ)
+	else 
+		xrange = range(start=x_old[1], stop=x_old[end], step=Δ)
+		yrange = range(start=y_old[1], stop=y_old[end], step=Δ)
+	end
+    
+    return (xrange, yrange)
+end
+
+function fit_potential2D(potential::Array{Float64},
+        xdim::Array{Float64}, ydim::Array{Float64}, 
+        xrange::AbstractRange, yrange::AbstractRange;
+        name::String="potential")
     #= Interpolates the provided potential with the cubic spline.
         Saves result to a NetCDF file. =#
     if ! ispow2(NPointsX) || ! ispow2(NPointsY)
@@ -238,11 +272,15 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
     # Define old and new range:
     xrange_old = range(start=xdim[1], stop=xdim[end], length=length(xdim))
     yrange_old = range(start=ydim[1], stop=ydim[end], length=length(ydim))
-    xrange = range(start=xdim[1], stop=xdim[end], length=NPointsX)
-    yrange = range(start=ydim[1], stop=ydim[end], length=NPointsY)
     # Interpolate and create a new grid:
     itp = cubic_spline_interpolation((xrange_old, yrange_old), potential)
-    itp_pot = vcat([ [ itp(x, y) for x in xrange] for y in yrange ]'...)
+    itp_pot = Array{Float64}(undef, length(xrange), length(yrange))
+    # Interpolate potential on the new grid:
+    for (iy, y) in enumerate(yrange)
+        for (ix, x) in enumerate(xrange)
+            itp_pot[ix, iy] = itp(x, y)
+        end
+    end
     # Check for succesfull interpolation:
     if any(isnan.(itp_pot))
         println("\t" * "*"^20 * "WARNING" * "*"^20)
@@ -252,14 +290,14 @@ function fit_potential2D(potential::Array{Float64}, xdim::Array{Float64}, ydim::
     endswith(name, ".nc") ? outname = name : outname = name * ".nc"
     NCDataset(outname, "c") do potfile
         potfile.attrib["title"] = "File with potential energy surface for usage in QD engine"
-        defDim(potfile, "x", NPointsX)
-        defDim(potfile, "y", NPointsY)
+        defDim(potfile, "x", length(xrange))
+        defDim(potfile, "y", length(yrange))
         defVar(potfile, "xdim", collect(xrange), ("x", ))
         defVar(potfile, "ydim", collect(yrange), ("y", ))
         defVar(potfile, "potential", itp_pot, ("x", "y"))
     end
     # Plot results:
-    contour(collect(xrange), collect(yrange), itp_pot,
+    contour(collect(xrange), collect(yrange), itp_pot',
             xlabel="X [Bohr]",
             ylabel="Y [Bohr]",
             title="Interpolated potential",
@@ -301,41 +339,40 @@ if haskey(input["potfit"], "FWHM")
     do_smoothing = true
 else
     do_smoothing = false
-    FWHM = 0.0
-    #throw(ArgumentError("FWHM keyword not found in `potfit` block!
-    #Please provide the FWHM of Gaussian kernel used for smoothing the potentails (in Borhs).
-    #Optimal value should be around step-size of the scan."))
 end
 
 if input["dimensions"] == 1
-    (xdim, potential) = read_potential(input["potfit"]["potfile"])
-    if do_smoothing
-        potential = smoothing(potential, xdim, FWHM)
-    end
+    (xdim, potential) = read_potential(input["potfit"]["potfile"]) # Read potential from file
 
 ########################## INFO
     println("""
 \t  1D dimensional potential
 \t  Potential taken from: $(input["potfit"]["potfile"])
 \t  range: [$(xdim[1]), $(xdim[end])]
-\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.
 \t  Number of points before interpolation: $(length(xdim))
-\t  Number of points after interpolation: $(input["potfit"]["NPoints"])
-""")
+\t  Number of points after interpolation: $(input["potfit"]["NPoints"])""")
 ##########################
-    
+
+    if do_smoothing 
+        potential = smoothing(potential, xdim, FWHM) # Smooth
+        println("\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.")
+    end
+
+    # Interpolate potential    
     if haskey(input["potfit"], "name")
         fit_potential1D(potential, xdim, input["potfit"]["NPoints"]; name=input["potfit"]["name"])
-        println("\t  File $(input["potfit"]["name"]) created.")
+        println("\n\t  File $(input["potfit"]["name"]) created.")
     else
         fit_potential1D(potential, xdim, input["potfit"]["NPoints"])
-        println("\t  File potential.nc created.")
+        println("\n\t  File potential.nc created.")
     end
+
 elseif input["dimensions"] == 2
-    (potential, xdim, ydim) = read_potential2D(input["potfit"]["potfile"])
-    if do_smoothing
-        potential  = smoothing(potential, xdim, ydim, FWHM)
-    end
+    (potential, xdim, ydim) = read_potential2D(input["potfit"]["potfile"]) # Read potential from file
+    # Define new grid
+    (xdim_new, ydim_new) = define_2D_grid(xdim, ydim, input["potfit"]["step"]; keep_pow2=input["potfit"]["pow2"])
+    NPointsX = length(xdim_new)
+    NPointsY = length(ydim_new)
 
 ##########################  INFO
     println("""
@@ -343,18 +380,23 @@ elseif input["dimensions"] == 2
 \t  Potential taken from: $(input["potfit"]["potfile"])
 \t  X-range: [$(xdim[1]), $(xdim[end])]
 \t  Y-range: [$(ydim[1]), $(ydim[end])]
-\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.
-\t  Number of points before interpolation: $(length(potential))
-\t  Number of points after interpolation: $(input["potfit"]["NPoints"][1]*input["potfit"]["NPoints"][2])
-""")
+\t  Number of points before interpolation: ($(length(xdim))×$(length(ydim))) = $(length(potential))
+\t  Number of points after interpolation: ($(NPointsX)×$(NPointsY)) = $(NPointsX * NPointsY)""")
 ##########################
 
+    if do_smoothing
+        potential  = smoothing(potential, xdim, ydim, FWHM) # Smooth potentail
+        println("\t  Potential smoothed using Gaussian kernel with FWHM = $(FWHM) Bohrs before interpolation.")
+
+    end
+
+    # Interpolate potential
     if haskey(input["potfit"], "name")
-        fit_potential2D(potential, xdim, ydim, input["potfit"]["NPoints"][1], input["potfit"]["NPoints"][2]; name=input["potfit"]["name"])
-        println("\t  File $(input["potfit"]["name"]) created.")
+        fit_potential2D(potential, xdim, ydim, xdim_new, ydim_new; name=input["potfit"]["name"])
+        println("\n\t  File $(input["potfit"]["name"]) created.")
     else
-        fit_potential2D(potential, xdim, ydim, input["potfit"]["NPoints"][1], input["potfit"]["NPoints"][2])
-        println("\t  File potential.nc created.")
+        fit_potential2D(potential, xdim, ydim,  xdim_new, ydim_new)
+        println("\n\t  File potential.nc created.")
     end
 end
 
