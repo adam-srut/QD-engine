@@ -58,7 +58,7 @@ using Printf, Dates, ArgParse
 using Trapz
 using Base.Threads
 
-# Set number of threads for numerical routines:
+# Set a number of threads for numerical routines:
 # Keep FFTW serial, FT is pre-planned.
 FFTW.set_num_threads(1)
 BLAS.set_num_threads(Threads.nthreads()) 
@@ -319,7 +319,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
             state = vecs[:, ivec]
             # calculate the norm:
             n = trapz(metadata.xdim, conj.(state) .* state )
-            vecs_rnm[:, ivec] = state/n
+            vecs_rnm[:, ivec] .= state ./ n
         end
         return vecs_rnm
     elseif metadata.input["dimensions"] == 2
@@ -330,7 +330,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
             state = reshape(vecs[:, ivec], (Nx, Ny))
             # calculate the norm:
             n = trapz((metadata.xdim, metadata.ydim), conj.(state) .* state )
-            vecs_rnm[:, :, ivec] = state/n
+            vecs_rnm[:, :, ivec] .= state ./ n
         end
         return vecs_rnm
     end
@@ -351,10 +351,8 @@ function prepare_inp_param(metadata::MetaData)
     end
     # Check if the user provided advanced parameters:
     if haskey(metadata.input["variational"], "advanced")
-        # Merge default parameters with user-defined parameters
-        for (key, value) in metadata.input["variational"]["advanced"]
-            advancedParams[key] = value
-        end
+        # Merge default parameters with user-defined parametersi
+        advancedParams = merge(advancedParams, metadata.input["variational"]["advanced"])
     end
     # Merge advanced parameters with default parameters:
     metadata.input["variational"]["advanced"] = advancedParams
@@ -364,7 +362,7 @@ end
 function execute_variational(metadata::MetaData)
     #= Execute the variational algorithm =#
     
-    # Dynamic Fourier Method (avoid constructing of the full Hamiltonian matrix): 
+    # Dynamic Fourier Method (avoid constructing the full Hamiltonian matrix): 
     if lowercase.(metadata.input["variational"]["method"]) == "dynamicfourier"
         println("\n\tDynamic Fourier method: ")
         println("\t  The full Hamiltonian matrix will *not* be constructed.")
@@ -401,7 +399,6 @@ function execute_variational(metadata::MetaData)
     else
         println(@sprintf "\t  %-28s%8.2f GB" "Size in memory:" (size(H,1)^2*16 / 1024^3))
     end
-    # println(@sprintf "\t  %-28s%8.2f GB" "Total memory allocated:" Int(round(resH.bytes / 1024^3)))
     flush(stdout)
 
     # Call garbage collector:
@@ -521,24 +518,24 @@ end
 function print_input(input::Dict)
     # Print content of the input file:
     println("\t===============> Input parameters <===============")
-    println(@sprintf "\t%-28s%14d" "Number of dimensions" input["dimensions"])
+    println(@sprintf "\t  %-28s%14d" "Number of dimensions" input["dimensions"])
     if input["dimensions"] == 1
-        println(@sprintf "\t%-28s%14.4f" "Mass" input["mass"])
+        println(@sprintf "\t  %-28s%14.4f" "Mass" input["mass"])
     elseif input["dimensions"] == 2
-        println(@sprintf "\t%-28s%14.4f" "Mass X" input["mass"][1])
-        println(@sprintf "\t%-28s%14.4f" "Mass Y" input["mass"][2])
+        println(@sprintf "\t  %-28s%14.4f" "Mass X" input["mass"][1])
+        println(@sprintf "\t  %-28s%14.4f" "Mass Y" input["mass"][2])
     end
-    println(@sprintf "\t%-28s%14s" "Potential file" input["potential"])
+    println(@sprintf "\t  %-28s%14s" "Potential file" input["potential"])
     if haskey(input, "kcoup")
-        println(@sprintf "\t%-28s%14.2f" "Kinetic coupling" input["kcoup"])
+        println(@sprintf "\t  %-28s%14.2f" "Kinetic coupling" input["kcoup"])
     end
     println("\tvariational parameters:")
     for (key, value) in input["variational"]
         if key != "advanced"
-            println(@sprintf "\t  %-26s%14s" key value)
+            println(@sprintf "\t    %-26s%14s" key value)
         elseif lowercase.(input["variational"]["method"]) != "exact"
             for (key, value) in input["variational"]["advanced"]
-                println(@sprintf "\t  %-26s%14s" key value)
+                println(@sprintf "\t    %-26s%14s" key value)
             end
         end
     end
@@ -570,7 +567,6 @@ vals = vals .* constants["Eh_to_wn"]
 # Print energies:
 println("\n\tCalculated energies in cm⁻¹:")
 for val in vals
-    eng = Int(round(round(val)))
     println(@sprintf "\t%12.2f" val)
 end
 
