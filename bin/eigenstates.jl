@@ -161,7 +161,7 @@ function plot_eigenstates(WF::NCDataset, eigenstates::Array, energies::Array)
         xdim = WF["Xdim"][:]
         ydim = WF["Ydim"][:]
         for (state, eng) in zip(eigenstates, energies)
-            contourf(xdim, ydim, real.(state),
+            contourf(xdim, ydim, real.(state)',
                     color=:lightrainbow,
                     xlabel="X [Bohr]", ylabel = "Y [Bohr]",
                     legend=true, levels=10, lw=1.4,
