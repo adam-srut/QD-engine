@@ -80,7 +80,7 @@ function compute_eigenstate(WF::NCDataset, energy::Number, input::Dict)
             eigenstate .+= wf * exp( im*t*energy )
         end
         wfnorm = trapz( WF["Xdim"][:], conj.(eigenstate) .* eigenstate )
-        eigenstate = eigenstate/wfnorm
+        eigenstate = eigenstate ./ sqrt(wfnorm)
     elseif dimensions == 2
         eigenstate = zeros(size(WF["WFRe"])[1], size(WF["WFRe"])[2]) .+ 0im
         for ti in 1:NSteps
@@ -89,7 +89,7 @@ function compute_eigenstate(WF::NCDataset, energy::Number, input::Dict)
             eigenstate .+= wf * exp( im*t*energy )
         end
         wfnorm = trapz( (WF["Xdim"][:], WF["Ydim"][:]), conj.(eigenstate) .* eigenstate )
-        eigenstate = eigenstate/wfnorm
+        eigenstate = eigenstate ./ sqrt(wfnorm)
     end 
     eng = Int(round(round(energy*constants["Eh_to_wn"])))
     println("\t    => Eigenstate at energy $eng cm⁻¹ done.")

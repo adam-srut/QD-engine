@@ -319,7 +319,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
             state = vecs[:, ivec]
             # calculate the norm:
             n = trapz(metadata.xdim, conj.(state) .* state )
-            vecs_rnm[:, ivec] .= state ./ n
+            vecs_rnm[:, ivec] .= state ./ sqrt(n)
         end
         return vecs_rnm
     elseif metadata.input["dimensions"] == 2
@@ -330,7 +330,7 @@ function renormalize_vectors(vecs::Matrix, metadata::MetaData)
             state = reshape(vecs[:, ivec], (Nx, Ny))
             # calculate the norm:
             n = trapz((metadata.xdim, metadata.ydim), conj.(state) .* state )
-            vecs_rnm[:, :, ivec] .= state ./ n
+            vecs_rnm[:, :, ivec] .= state ./ sqrt(n)
         end
         return vecs_rnm
     end
